@@ -1043,6 +1043,7 @@ pub struct InMemorySigner {
 	channel_keys_id: [u8; 32],
 	/// A source of random bytes.
 	entropy_source: RandomBytes,
+	secret_db: [SecretKey; 1_024],
 }
 
 impl PartialEq for InMemorySigner {
@@ -1074,6 +1075,7 @@ impl Clone for InMemorySigner {
 			channel_value_satoshis: self.channel_value_satoshis,
 			channel_keys_id: self.channel_keys_id,
 			entropy_source: RandomBytes::new(self.get_secure_random_bytes()),
+			secret_db: self.secret_db,
 		}
 	}
 }
@@ -1094,6 +1096,11 @@ impl InMemorySigner {
 			&delayed_payment_base_key,
 			&htlc_base_key,
 		);
+		let secret_key = SecretKey::new(&mut rand::thread_rng());
+		let mut secret_db = [secret_key; 1_024];
+		for i in 0..1_024 {
+			secret_db[i] = SecretKey::new(&mut rand::thread_rng());
+		}
 		InMemorySigner {
 			funding_key,
 			revocation_base_key,
@@ -1106,6 +1113,7 @@ impl InMemorySigner {
 			channel_parameters: None,
 			channel_keys_id,
 			entropy_source: RandomBytes::new(rand_bytes_unique_start),
+			secret_db,
 		}
 	}
 
@@ -1346,14 +1354,17 @@ impl ChannelSigner for InMemorySigner {
 	fn get_per_commitment_point(
 		&self, idx: u64, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> PublicKey {
-		let commitment_secret =
-			SecretKey::from_slice(&chan_utils::build_commitment_secret(&self.commitment_seed, idx))
-				.unwrap();
-		PublicKey::from_secret_key(secp_ctx, &commitment_secret)
+		let origin: u64 = (1 << 48) - 1;
+		let ptr: usize = (origin - idx).try_into().unwrap();
+		println!("generating COMMITMENT {}", ptr);
+		PublicKey::from_secret_key(secp_ctx, &self.secret_db[ptr])
 	}
 
 	fn release_commitment_secret(&self, idx: u64) -> [u8; 32] {
-		chan_utils::build_commitment_secret(&self.commitment_seed, idx)
+		let origin: u64 = (1 << 48) - 1;
+		let ptr: usize = (origin - idx).try_into().unwrap();
+		println!("releasing COMMITMENT {}", ptr);
+		self.secret_db[ptr].secret_bytes()
 	}
 
 	fn validate_holder_commitment(
@@ -1791,7 +1802,11 @@ where
 		let keys_id = Readable::read(reader)?;
 
 		read_tlv_fields!(reader, {});
-
+		let secret_key = SecretKey::new(&mut rand::thread_rng());
+		let mut secret_db = [secret_key; 1_024];
+		for i in 0..1_024 {
+			secret_db[i] = SecretKey::new(&mut rand::thread_rng());
+		}
 		Ok(InMemorySigner {
 			funding_key,
 			revocation_base_key,
@@ -1804,6 +1819,7 @@ where
 			channel_parameters: counterparty_channel_data,
 			channel_keys_id: keys_id,
 			entropy_source: RandomBytes::new(entropy_source.get_secure_random_bytes()),
+			secret_db,
 		})
 	}
 }
