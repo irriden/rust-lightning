@@ -971,6 +971,25 @@ pub type SimpleArcChannelManager<M, T, F, L> = ChannelManager<
 	Arc<L>
 >;
 
+/// Document this...
+#[cfg(not(c_bindings))]
+pub type SimpleArcChannelManagerCustom<M, T, F, L, SP> = ChannelManager<
+	Arc<M>,
+	Arc<T>,
+	Arc<KeysManager>,
+	Arc<KeysManager>,
+	Arc<SP>,
+	Arc<F>,
+	Arc<DefaultRouter<
+		Arc<NetworkGraph<Arc<L>>>,
+		Arc<L>,
+		Arc<RwLock<ProbabilisticScorer<Arc<NetworkGraph<Arc<L>>>, Arc<L>>>>,
+		ProbabilisticScoringFeeParameters,
+		ProbabilisticScorer<Arc<NetworkGraph<Arc<L>>>, Arc<L>>,
+	>>,
+	Arc<L>
+>;
+
 /// [`SimpleRefChannelManager`] is a type alias for a ChannelManager reference, and is the reference
 /// counterpart to the [`SimpleArcChannelManager`] type alias. Use this type by default when you don't
 /// need a ChannelManager with a static lifetime. You'll need a static lifetime in cases such as

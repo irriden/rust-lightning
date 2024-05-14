@@ -1088,14 +1088,12 @@ impl ChannelSigner for InMemorySigner {
 	fn get_per_commitment_point(&self, idx: u64, secp_ctx: &Secp256k1<secp256k1::All>) -> PublicKey {
 		let origin: u64 = (1 << 48) - 1;
 		let ptr: usize = (origin - idx).try_into().unwrap();
-		println!("generating COMMITMENT {}", ptr);
 		PublicKey::from_secret_key(secp_ctx, &self.secret_db[ptr])
 	}
 
 	fn release_commitment_secret(&self, idx: u64) -> [u8; 32] {
 		let origin: u64 = (1 << 48) - 1;
 		let ptr: usize = (origin - idx).try_into().unwrap();
-		println!("releasing COMMITMENT {}", ptr);
 		self.secret_db[ptr].secret_bytes()
 	}
 

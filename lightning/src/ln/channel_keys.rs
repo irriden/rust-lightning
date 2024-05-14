@@ -151,15 +151,19 @@ key_read_write!(HtlcKey);
 /// from the base point and the per_commitment_key. This is the public equivalent of
 /// derive_private_key - using only public keys to derive a public key instead of private keys.
 fn derive_public_key<T: secp256k1::Signing>(secp_ctx: &Secp256k1<T>, per_commitment_point: &PublicKey, base_point: &PublicKey) -> PublicKey {
+    let secp = Secp256k1::new();
 	let mut sha = Sha256::engine();
 	sha.input(&per_commitment_point.serialize());
 	sha.input(&base_point.serialize());
 	let res = Sha256::from_engine(sha).to_byte_array();
-
+	let tweak = Scalar::from_be_bytes(res).expect("negligible");
+	base_point.mul_tweak(&secp, &tweak).expect("negligible")
+/*
 	let hashkey = PublicKey::from_secret_key(&secp_ctx,
 		&SecretKey::from_slice(&res).expect("Hashes should always be valid keys unless SHA-256 is broken"));
 	base_point.combine(&hashkey)
 		.expect("Addition only fails if the tweak is the inverse of the key. This is not possible when the tweak contains the hash of the key.")
+*/
 }
 
 /// Master key used in conjunction with per_commitment_point to generate [htlcpubkey](https://github.com/lightning/bolts/blob/master/03-transactions.md#key-derivation) for the latest state of a channel.

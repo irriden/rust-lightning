@@ -282,7 +282,7 @@ impl CounterpartyCommitmentSecrets {
 	/// was generated in accordance with BOLT 3 and is consistent with previous secrets.
 	pub fn provide_secret(&mut self, idx: u64, secret: [u8; 32]) -> Result<(), ()> {
 		let pos = Self::place_secret(idx);
-		println!("inserting secret at position {}", pos);
+		//println!("inserting secret at position {}", pos);
 		self.old_secrets[pos] = (Some(secret));
 		Ok(())
 	}
@@ -315,7 +315,7 @@ pub fn derive_private_key<T: secp256k1::Signing>(secp_ctx: &Secp256k1<T>, per_co
 	sha.input(&PublicKey::from_secret_key(&secp_ctx, &base_secret).serialize());
 	let res = Sha256::from_engine(sha).to_byte_array();
 
-	base_secret.clone().add_tweak(&Scalar::from_be_bytes(res).unwrap())
+	base_secret.clone().mul_tweak(&Scalar::from_be_bytes(res).unwrap())
 		.expect("Addition only fails if the tweak is the inverse of the key. This is not possible when the tweak contains the hash of the key.")
 }
 
@@ -512,8 +512,9 @@ impl_writeable_tlv_based!(HTLCOutputInCommitment, {
 	(8, transaction_output_index, option),
 });
 
+/// Please document haha
 #[inline]
-pub(crate) fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey) -> ScriptBuf {
+pub fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey) -> ScriptBuf {
 	let payment_hash160 = Ripemd160::hash(&htlc.payment_hash.0[..]).to_byte_array();
 	if htlc.offered {
 		let mut bldr = Builder::new().push_opcode(opcodes::all::OP_DUP)

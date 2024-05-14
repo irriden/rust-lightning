@@ -25,7 +25,7 @@ use crate::ln::features::{InitFeatures, NodeFeatures};
 use crate::ln::msgs;
 use crate::ln::msgs::{ChannelMessageHandler, LightningError, SocketAddress, OnionMessageHandler, RoutingMessageHandler};
 #[cfg(not(c_bindings))]
-use crate::ln::channelmanager::{SimpleArcChannelManager, SimpleRefChannelManager};
+use crate::ln::channelmanager::{SimpleArcChannelManager, SimpleArcChannelManagerCustom, SimpleRefChannelManager};
 use crate::util::ser::{VecWriter, Writeable, Writer};
 use crate::ln::peer_channel_encryptor::{PeerChannelEncryptor, NextNoiseStep, MessageBuf, MSG_BUF_ALLOC_SIZE};
 use crate::ln::wire;
@@ -644,6 +644,18 @@ pub type SimpleArcPeerManager<SD, M, T, F, C, L> = PeerManager<
 	Arc<SimpleArcChannelManager<M, T, F, L>>,
 	Arc<P2PGossipSync<Arc<NetworkGraph<Arc<L>>>, C, Arc<L>>>,
 	Arc<SimpleArcOnionMessenger<M, T, F, L>>,
+	Arc<L>,
+	IgnoringMessageHandler,
+	Arc<KeysManager>
+>;
+
+/// Document this now
+#[cfg(not(c_bindings))]
+pub type SimpleArcPeerManagerCustom<SD, M, T, F, L, SP> = PeerManager<
+	SD,
+	Arc<SimpleArcChannelManagerCustom<M, T, F, L, SP>>,
+	IgnoringMessageHandler,
+	IgnoringMessageHandler,
 	Arc<L>,
 	IgnoringMessageHandler,
 	Arc<KeysManager>
