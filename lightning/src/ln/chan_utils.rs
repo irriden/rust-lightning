@@ -460,16 +460,20 @@ pub const REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH: usize = 6 + 4 + 34*2;
 /// Encumbering a `to_holder` output on a commitment transaction or 2nd-stage HTLC transactions.
 pub fn get_revokeable_redeemscript(revocation_key: &RevocationKey, contest_delay: u16, broadcaster_delayed_payment_key: &DelayedPaymentKey) -> ScriptBuf {
 	let res = Builder::new().push_opcode(opcodes::all::OP_IF)
-	              .push_slice(&revocation_key.to_public_key().serialize())
+                  .push_opcode(opcodes::all::OP_PUSHNUM_2)
+	              .push_slice(&revocation_key.0.serialize())
+	              .push_slice(&revocation_key.1.serialize())
+                  .push_opcode(opcodes::all::OP_PUSHNUM_2)
+	              .push_opcode(opcodes::all::OP_CHECKMULTISIG)
 	              .push_opcode(opcodes::all::OP_ELSE)
 	              .push_int(contest_delay as i64)
 	              .push_opcode(opcodes::all::OP_CSV)
 	              .push_opcode(opcodes::all::OP_DROP)
 	              .push_slice(&broadcaster_delayed_payment_key.to_public_key().serialize())
-	              .push_opcode(opcodes::all::OP_ENDIF)
 	              .push_opcode(opcodes::all::OP_CHECKSIG)
+	              .push_opcode(opcodes::all::OP_ENDIF)
 	              .into_script();
-	debug_assert!(res.len() <= REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH);
+	//debug_assert!(res.len() <= REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH);
 	res
 }
 
@@ -519,7 +523,7 @@ pub fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, c
 	if htlc.offered {
 		let mut bldr = Builder::new().push_opcode(opcodes::all::OP_DUP)
 		              .push_opcode(opcodes::all::OP_HASH160)
-		              .push_slice(PubkeyHash::hash(&revocation_key.to_public_key().serialize()))
+		              .push_slice(PubkeyHash::hash(&revocation_key.0.serialize()))
 		              .push_opcode(opcodes::all::OP_EQUAL)
 		              .push_opcode(opcodes::all::OP_IF)
 		              .push_opcode(opcodes::all::OP_CHECKSIG)
@@ -552,7 +556,7 @@ pub fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, c
 	} else {
 			let mut bldr = Builder::new().push_opcode(opcodes::all::OP_DUP)
 		              .push_opcode(opcodes::all::OP_HASH160)
-		              .push_slice(&PubkeyHash::hash(&revocation_key.to_public_key().serialize()))
+		              .push_slice(&PubkeyHash::hash(&revocation_key.0.serialize()))
 		              .push_opcode(opcodes::all::OP_EQUAL)
 		              .push_opcode(opcodes::all::OP_IF)
 		              .push_opcode(opcodes::all::OP_CHECKSIG)

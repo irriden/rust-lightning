@@ -183,7 +183,7 @@ key_read_write!(RevocationBasepoint);
 /// See [the BOLT spec for derivation details]
 /// (https://github.com/lightning/bolts/blob/master/03-transactions.md#revocationpubkey-derivation)
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Hash)]
-pub struct RevocationKey(pub PublicKey);
+pub struct RevocationKey(pub PublicKey, pub PublicKey);
 
 impl RevocationKey {
 	/// Derives a per-commitment-transaction revocation public key from one party's per-commitment
@@ -200,6 +200,7 @@ impl RevocationKey {
 		countersignatory_basepoint: &RevocationBasepoint,
 		per_commitment_point: &PublicKey,
 	) -> Self {
+    /*
 		let rev_append_commit_hash_key = {
 			let mut sha = Sha256::engine();
 			sha.input(&countersignatory_basepoint.to_public_key().serialize());
@@ -221,7 +222,8 @@ impl RevocationKey {
 			.expect("Multiplying a valid public key by a hash is expected to never fail per secp256k1 docs");
 		let pk = countersignatory_contrib.combine(&broadcaster_contrib)
 			.expect("Addition only fails if the tweak is the inverse of the key. This is not possible when the tweak commits to the key.");
-		Self(pk)
+    */
+		Self(per_commitment_point.clone(), countersignatory_basepoint.0)
 	}
 
 	/// Get inner Public Key
@@ -229,7 +231,21 @@ impl RevocationKey {
 		self.0
 	}
 }
-key_read_write!(RevocationKey);
+//key_read_write!(RevocationKey);
+impl Writeable for RevocationKey {
+    fn write<W: Writer>(&self, w: &mut W) -> Result<(), io::Error> {
+        self.0.serialize().write(w)?;
+        self.1.serialize().write(w)
+    }
+}
+
+impl Readable for RevocationKey {
+    fn read<R: io::Read>(r: &mut R) -> Result<Self, DecodeError> {
+        let key: PublicKey = Readable::read(r)?;
+        let key_2: PublicKey = Readable::read(r)?;
+        Ok(Self(key, key_2))
+    }
+}
 
 
 #[cfg(test)]
