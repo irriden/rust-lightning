@@ -1169,7 +1169,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 		Ok(trusted_tx.built_transaction().sign_holder_commitment(&self.funding_key, &funding_redeemscript, self.channel_value_satoshis, &self, secp_ctx))
 	}
 
-	fn sign_justice_revoked_output(&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey, secp_ctx: &Secp256k1<secp256k1::All>) -> Result<Signature, ()> {
+	fn sign_justice_revoked_output(&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey, secp_ctx: &Secp256k1<secp256k1::All>) -> Result<(Signature, Signature), ()> {
 		let revocation_key = chan_utils::derive_private_revocation_key(&secp_ctx, &per_commitment_key, &self.revocation_base_key);
 		let per_commitment_point = PublicKey::from_secret_key(secp_ctx, &per_commitment_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
@@ -1184,7 +1184,9 @@ impl EcdsaChannelSigner for InMemorySigner {
 		};
 		let mut sighash_parts = sighash::SighashCache::new(justice_tx);
 		let sighash = hash_to_message!(&sighash_parts.segwit_signature_hash(input, &witness_script, amount, EcdsaSighashType::All).unwrap()[..]);
-		return Ok(sign_with_aux_rand(secp_ctx, &sighash, &revocation_key, &self))
+		let sig_0 = sign_with_aux_rand(secp_ctx, &sighash, &per_commitment_key, &self);
+		let sig_1 = sign_with_aux_rand(secp_ctx, &sighash, &self.revocation_base_key, &self);
+		return Ok((sig_0, sig_1))
 	}
 
 	fn sign_justice_revoked_htlc(&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey, htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>) -> Result<Signature, ()> {

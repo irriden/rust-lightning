@@ -78,7 +78,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	/// so).
 	fn sign_justice_revoked_output(&self, justice_tx: &Transaction, input: usize, amount: u64,
 		per_commitment_key: &SecretKey, secp_ctx: &Secp256k1<secp256k1::All>
-	) -> Result<Signature, ()>;
+	) -> Result<(Signature, Signature), ()>;
 	/// Create a signature for the given input in a transaction spending a commitment transaction
 	/// HTLC output when our counterparty broadcasts an old state.
 	///

@@ -3042,7 +3042,9 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 
 		let sig = self.onchain_tx_handler.signer.sign_justice_revoked_output(
 			&justice_tx, input_idx, value, &per_commitment_key, &self.onchain_tx_handler.secp_ctx)?;
-		justice_tx.input[input_idx].witness.push_bitcoin_signature(&sig.serialize_der(), EcdsaSighashType::All);
+		justice_tx.input[input_idx].witness.push(&[]);
+		justice_tx.input[input_idx].witness.push_bitcoin_signature(&sig.0.serialize_der(), EcdsaSighashType::All);
+		justice_tx.input[input_idx].witness.push_bitcoin_signature(&sig.1.serialize_der(), EcdsaSighashType::All);
 		justice_tx.input[input_idx].witness.push(&[1u8]);
 		justice_tx.input[input_idx].witness.push(revokeable_redeemscript.as_bytes());
 		Ok(justice_tx)
