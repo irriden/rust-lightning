@@ -453,7 +453,9 @@ impl TxCreationKeys {
 // keys of 33 bytes (+ 1 push). Generally, pushes are only 2 bytes (for values below 0x7fff, i.e.
 // around 7 months), however, a 7 month contest delay shouldn't result in being unable to reclaim
 // on-chain funds.
-pub const REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH: usize = 6 + 4 + 34*2;
+//pub const REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH: usize = 6 + 4 + 34*2;
+// in this fork, net, this script adds a public key, and three opcodes
+pub const REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH: usize = 6 + 4 + 34*2 + 3 + 34;
 
 /// A script either spendable by the revocation
 /// key or the broadcaster_delayed_payment_key and satisfying the relative-locktime OP_CSV constrain.
@@ -473,7 +475,7 @@ pub fn get_revokeable_redeemscript(revocation_key: &RevocationKey, contest_delay
 	              .push_opcode(opcodes::all::OP_CHECKSIG)
 	              .push_opcode(opcodes::all::OP_ENDIF)
 	              .into_script();
-	//debug_assert!(res.len() <= REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH);
+	debug_assert!(res.len() <= REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH);
 	res
 }
 
