@@ -793,7 +793,13 @@ where C::Target: chain::Filter,
 						log_debug!(logger, "Persistence of ChannelMonitorUpdate for channel {} in progress", log_funding_info!(monitor));
 					},
 					ChannelMonitorUpdateStatus::Completed => {
+                        use crate::bitcoin::consensus::Encodable;
 						log_debug!(logger, "Persistence of ChannelMonitorUpdate for channel {} completed", log_funding_info!(monitor));
+						let tx = monitor.unsafe_get_latest_holder_commitment_txn(&self.logger);
+                        let mut buf = Vec::<u8>::new();
+                        let mut cur = std::io::Cursor::new(&mut buf);
+                        tx.consensus_encode(&mut cur).unwrap();
+                        println!("{}", myhex::encode(buf));
 					},
 					ChannelMonitorUpdateStatus::UnrecoverableError => {
 						// Take the monitors lock for writing so that we poison it and any future
