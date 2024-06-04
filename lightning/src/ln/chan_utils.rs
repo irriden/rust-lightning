@@ -606,21 +606,23 @@ pub fn get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_feature
 /// Gets the redeemscript for a funding output from the two funding public keys.
 /// Note that the order of funding public keys does not matter.
 pub fn make_funding_redeemscript(broadcaster: &PublicKey, countersignatory: &PublicKey) -> ScriptBuf {
-	let broadcaster_funding_key = broadcaster.serialize();
-	let countersignatory_funding_key = countersignatory.serialize();
+	let broadcaster_funding_key = broadcaster.x_only_public_key().0.serialize();
+	let countersignatory_funding_key = countersignatory.x_only_public_key().0.serialize();
 
 	make_funding_redeemscript_from_slices(&broadcaster_funding_key, &countersignatory_funding_key)
 }
 
-pub(crate) fn make_funding_redeemscript_from_slices(broadcaster_funding_key: &[u8; 33], countersignatory_funding_key: &[u8; 33]) -> ScriptBuf {
-	let builder = Builder::new().push_opcode(opcodes::all::OP_PUSHNUM_2);
+pub(crate) fn make_funding_redeemscript_from_slices(broadcaster_funding_key: &[u8; 32], countersignatory_funding_key: &[u8; 32]) -> ScriptBuf {
+	let builder = Builder::new();
 	if broadcaster_funding_key[..] < countersignatory_funding_key[..] {
 		builder.push_slice(broadcaster_funding_key)
+			.push_opcode(opcodes::all::OP_CHECKSIGVERIFY)
 			.push_slice(countersignatory_funding_key)
 	} else {
 		builder.push_slice(countersignatory_funding_key)
+			.push_opcode(opcodes::all::OP_CHECKSIGVERIFY)
 			.push_slice(broadcaster_funding_key)
-	}.push_opcode(opcodes::all::OP_PUSHNUM_2).push_opcode(opcodes::all::OP_CHECKMULTISIG).into_script()
+	}.push_opcode(opcodes::all::OP_CHECKSIG).into_script()
 }
 
 /// Builds an unsigned HTLC-Success or HTLC-Timeout transaction from the given channel and HTLC

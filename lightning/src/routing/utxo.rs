@@ -459,8 +459,10 @@ impl PendingChecks {
 		let handle_result = |res| {
 			match res {
 				Ok(TxOut { value, script_pubkey }) => {
+                    todo!();
+                /*
 					let expected_script =
-						make_funding_redeemscript_from_slices(msg.bitcoin_key_1.as_array(), msg.bitcoin_key_2.as_array()).to_v0_p2wsh();
+						make_funding_redeemscript_from_slices(&msg.bitcoin_key_1.as_array()[1..], &msg.bitcoin_key_2.as_array()[1..]).to_v0_p2wsh();
 					if script_pubkey != expected_script {
 						return Err(LightningError{
 							err: format!("Channel announcement key ({}) didn't match on-chain script ({})",
@@ -468,6 +470,7 @@ impl PendingChecks {
 							action: ErrorAction::IgnoreError
 						});
 					}
+                */
 					Ok(Some(value))
 				},
 				Err(UtxoLookupError::UnknownChain) => {
