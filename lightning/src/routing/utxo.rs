@@ -15,11 +15,13 @@
 
 use bitcoin::TxOut;
 use bitcoin::blockdata::constants::ChainHash;
+use bitcoin::key::XOnlyPublicKey;
 
 use hex::DisplayHex;
 
 use crate::events::MessageSendEvent;
 use crate::ln::chan_utils::make_funding_redeemscript_from_slices;
+use crate::ln::chan_utils::SIMPLE_TAPROOT_NUMS;
 use crate::ln::msgs::{self, LightningError, ErrorAction};
 use crate::routing::gossip::{NetworkGraph, NodeId, P2PGossipSync};
 use crate::util::logger::{Level, Logger};
@@ -459,12 +461,14 @@ impl PendingChecks {
 		let handle_result = |res| {
 			match res {
 				Ok(TxOut { value, script_pubkey }) => {
+					let ctx = bitcoin::secp256k1::Secp256k1::new();
+					let nums = XOnlyPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap();
 					let mut pk_1: [u8; 32] = [0u8; 32];
 					let mut pk_2: [u8; 32] = [0u8; 32];
 					pk_1.copy_from_slice(&msg.bitcoin_key_1.as_array()[1..]);
 					pk_2.copy_from_slice(&msg.bitcoin_key_2.as_array()[1..]);
 					let expected_script =
-						make_funding_redeemscript_from_slices(&pk_1, &pk_2).to_v0_p2wsh();
+						make_funding_redeemscript_from_slices(&pk_1, &pk_2).to_v1_p2tr(&ctx, nums);
 					if script_pubkey != expected_script {
 						return Err(LightningError{
 							err: format!("Channel announcement key ({}) didn't match on-chain script ({})",
