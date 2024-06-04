@@ -3934,7 +3934,8 @@ where
 				is_batch_funding,
 				|chan, tx| {
 					let mut output_index = None;
-					let expected_spk = chan.context.get_funding_redeemscript().to_v0_p2wsh();
+					let nums = bitcoin::key::XOnlyPublicKey::from_slice(&super::chan_utils::SIMPLE_TAPROOT_NUMS).unwrap();
+					let expected_spk = chan.context.get_funding_redeemscript().to_v1_p2tr(&self.secp_ctx, nums);
 					for (idx, outp) in tx.output.iter().enumerate() {
 						if outp.script_pubkey == expected_spk && outp.value == chan.context.get_value_satoshis() {
 							if output_index.is_some() {
@@ -6271,7 +6272,8 @@ where
 					match phase.get_mut() {
 						ChannelPhase::UnfundedOutboundV1(chan) => {
 							try_chan_phase_entry!(self, chan.accept_channel(&msg, &self.default_configuration.channel_handshake_limits, &peer_state.latest_features), phase);
-							(chan.context.get_value_satoshis(), chan.context.get_funding_redeemscript().to_v0_p2wsh(), chan.context.get_user_id())
+							let nums = bitcoin::key::XOnlyPublicKey::from_slice(&super::chan_utils::SIMPLE_TAPROOT_NUMS).unwrap();
+							(chan.context.get_value_satoshis(), chan.context.get_funding_redeemscript().to_v1_p2tr(&self.secp_ctx, nums), chan.context.get_user_id())
 						},
 						_ => {
 							return Err(MsgHandleErrInternal::send_err_msg_no_close(format!("Got an unexpected accept_channel message from peer with counterparty_node_id {}", counterparty_node_id), msg.temporary_channel_id));
