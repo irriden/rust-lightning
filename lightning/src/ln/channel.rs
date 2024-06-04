@@ -13,6 +13,7 @@ use bitcoin::blockdata::transaction::Transaction;
 use bitcoin::sighash;
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::consensus::encode;
+use bitcoin::key::XOnlyPublicKey;
 
 use bitcoin::hashes::Hash;
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -6803,7 +6804,7 @@ impl<SP: Deref> OutboundV1Channel<SP> where SP::Target: SignerProvider {
 
 		let funding_redeemscript = self.context.get_funding_redeemscript();
 		let funding_txo = self.context.get_funding_txo().unwrap();
-		let funding_txo_script = funding_redeemscript.to_v0_p2wsh();
+		let funding_txo_script = funding_redeemscript.to_v1_p2tr(&self.context.secp_ctx, XOnlyPublicKey::from_slice(&chan_utils::SIMPLE_TAPROOT_NUMS).unwrap());
 		let obscure_factor = get_commitment_transaction_number_obscure_factor(&self.context.get_holder_pubkeys().payment_point, &self.context.get_counterparty_pubkeys().payment_point, self.context.is_outbound());
 		let shutdown_script = self.context.shutdown_scriptpubkey.clone().map(|script| script.into_inner());
 		let mut monitor_signer = signer_provider.derive_channel_signer(self.context.channel_value_satoshis, self.context.channel_keys_id);
