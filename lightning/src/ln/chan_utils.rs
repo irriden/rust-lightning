@@ -16,6 +16,7 @@ use bitcoin::blockdata::transaction::{TxIn,TxOut,OutPoint,Transaction};
 use bitcoin::sighash;
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::address::Payload;
+use bitcoin::key::UntweakedPublicKey;
 
 use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -73,6 +74,14 @@ pub const HTLC_TIMEOUT_INPUT_ANCHOR_WITNESS_WEIGHT: u64 = 288;
 /// The upper bound weight of an HTLC success input from a commitment transaction with anchor
 /// outputs.
 pub const HTLC_SUCCESS_INPUT_ANCHOR_WITNESS_WEIGHT: u64 = 327;
+
+/// SIMPLE_TAPROOT_NUMS defined in simple taproot bolt pr
+pub const SIMPLE_TAPROOT_NUMS: [u8;32] = [
+	0xdc, 0xa0, 0x94, 0x75, 0x11, 0x09, 0xd0, 0xbd,
+	0x05, 0x5d, 0x03, 0x56, 0x58, 0x74, 0xe8, 0x27,
+	0x6d, 0xd5, 0x3e, 0x92, 0x6b, 0x44, 0xe3, 0xbd,
+	0x1b, 0xb6, 0xbf, 0x4b, 0xc1, 0x30, 0xa2, 0x79
+];
 
 /// Gets the weight for an HTLC-Success transaction.
 #[inline]
