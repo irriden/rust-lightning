@@ -4862,8 +4862,6 @@ impl<SP: Deref> Channel<SP> where
 	fn build_signed_closing_transaction(&self, closing_tx: &ClosingTransaction, counterparty_sig: &Signature, sig: &Signature) -> Transaction {
 		let mut tx = closing_tx.trust().built_transaction().clone();
 
-		tx.input[0].witness.push(Vec::new()); // First is the multisig dummy
-
 		let funding_key = self.context.get_holder_pubkeys().funding_pubkey.serialize();
 		let counterparty_funding_key = self.context.counterparty_funding_pubkey().serialize();
 		let mut holder_sig = sig.serialize_der().to_vec();
@@ -4871,14 +4869,27 @@ impl<SP: Deref> Channel<SP> where
 		let mut cp_sig = counterparty_sig.serialize_der().to_vec();
 		cp_sig.push(EcdsaSighashType::All as u8);
 		if funding_key[..] < counterparty_funding_key[..] {
-			tx.input[0].witness.push(holder_sig);
 			tx.input[0].witness.push(cp_sig);
+			tx.input[0].witness.push(holder_sig);
 		} else {
-			tx.input[0].witness.push(cp_sig);
 			tx.input[0].witness.push(holder_sig);
+			tx.input[0].witness.push(cp_sig);
 		}
 
-		tx.input[0].witness.push(self.context.get_funding_redeemscript().into_bytes());
+		let s = self.context.get_funding_redeemscript();
+		tx.input[0].witness.push(s.to_bytes());
+
+		let leaf_hash = s.tapscript_leaf_hash();
+		let root = bitcoin::taproot::TapNodeHash::from(leaf_hash);
+		let nums = bitcoin::key::UntweakedPublicKey::from_slice(&chan_utils::SIMPLE_TAPROOT_NUMS).unwrap();
+		let mut ctrl = Vec::new();
+		use bitcoin::key::TapTweak;
+		match nums.tap_tweak(&self.context.secp_ctx, Some(root)) {
+			(_, bitcoin::key::Parity::Even) => ctrl.push(0xc0),
+			(_, bitcoin::key::Parity::Odd) => ctrl.push(0xc1),
+		}
+		ctrl.extend_from_slice(&nums.serialize());
+		tx.input[0].witness.push(ctrl);
 		tx
 	}
 
