@@ -4,6 +4,7 @@ use bitcoin::blockdata::transaction::Transaction;
 
 use bitcoin::secp256k1;
 use bitcoin::secp256k1::ecdsa::Signature;
+use bitcoin::secp256k1::schnorr;
 use bitcoin::secp256k1::{PublicKey, Secp256k1, SecretKey};
 
 use crate::ln::chan_utils::{
@@ -45,7 +46,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	fn sign_counterparty_commitment(
 		&self, commitment_tx: &CommitmentTransaction, inbound_htlc_preimages: Vec<PaymentPreimage>,
 		outbound_htlc_preimages: Vec<PaymentPreimage>, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<(Signature, Vec<Signature>), ()>;
+	) -> Result<(schnorr::Signature, Vec<Signature>), ()>;
 	/// Creates a signature for a holder's commitment transaction.
 	///
 	/// This will be called
@@ -66,7 +67,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	// TODO: Document the things someone using this interface should enforce before signing.
 	fn sign_holder_commitment(
 		&self, commitment_tx: &HolderCommitmentTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()>;
+	) -> Result<schnorr::Signature, ()>;
 	/// Same as [`sign_holder_commitment`], but exists only for tests to get access to holder
 	/// commitment transactions which will be broadcasted later, after the channel has moved on to a
 	/// newer state. Thus, needs its own method as [`sign_holder_commitment`] may enforce that we
@@ -74,7 +75,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	#[cfg(any(test, feature = "unsafe_revoked_tx_signing"))]
 	fn unsafe_sign_holder_commitment(
 		&self, commitment_tx: &HolderCommitmentTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()>;
+	) -> Result<schnorr::Signature, ()>;
 	/// Create a signature for the given input in a transaction spending an HTLC transaction output
 	/// or a commitment transaction `to_local` output when our counterparty broadcasts an old state.
 	///
@@ -183,7 +184,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	/// chosen to forgo their output as dust.
 	fn sign_closing_transaction(
 		&self, closing_tx: &ClosingTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()>;
+	) -> Result<schnorr::Signature, ()>;
 	/// Computes the signature for a commitment transaction's anchor output used as an
 	/// input within `anchor_tx`, which spends the commitment transaction, at index `input`.
 	///

@@ -1,7 +1,7 @@
 use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::hashes::hmac::{Hmac, HmacEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
-use bitcoin::secp256k1::{Message, Secp256k1, SecretKey, ecdsa::Signature, Signing};
+use bitcoin::secp256k1::{Message, Secp256k1, SecretKey, ecdsa::Signature, Signing, schnorr, KeyPair};
 
 use crate::sign::EntropySource;
 
@@ -61,6 +61,12 @@ pub fn sign<C: Signing>(ctx: &Secp256k1<C>, msg: &Message, sk: &SecretKey) -> Si
 	#[cfg(not(feature = "grind_signatures"))]
 	let sig = ctx.sign_ecdsa(msg, sk);
 	sig
+}
+
+pub fn sign_schnorr<C: Signing>(
+	ctx: &Secp256k1<C>, msg: &Message, kp: &KeyPair,
+) -> schnorr::Signature {
+	ctx.sign_schnorr_no_aux_rand(&msg, &kp)
 }
 
 #[inline]

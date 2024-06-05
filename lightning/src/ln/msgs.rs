@@ -27,6 +27,7 @@
 use bitcoin::blockdata::constants::ChainHash;
 use bitcoin::secp256k1::PublicKey;
 use bitcoin::secp256k1::ecdsa::Signature;
+use bitcoin::secp256k1::schnorr;
 use bitcoin::{secp256k1, Witness};
 use bitcoin::blockdata::script::ScriptBuf;
 use bitcoin::hash_types::Txid;
@@ -365,7 +366,7 @@ pub struct FundingCreated {
 	/// The specific output index funding this channel
 	pub funding_output_index: u16,
 	/// The signature of the channel initiator (funder) on the initial commitment transaction
-	pub signature: Signature,
+	pub signature: schnorr::Signature,
 	#[cfg(taproot)]
 	/// The partial signature of the channel initiator (funder)
 	pub partial_signature_with_nonce: Option<PartialSignatureWithNonce>,
@@ -384,7 +385,7 @@ pub struct FundingSigned {
 	/// The channel ID
 	pub channel_id: ChannelId,
 	/// The signature of the channel acceptor (fundee) on the initial commitment transaction
-	pub signature: Signature,
+	pub signature: schnorr::Signature,
 	#[cfg(taproot)]
 	/// The partial signature of the channel acceptor (fundee)
 	pub partial_signature_with_nonce: Option<PartialSignatureWithNonce>,
@@ -625,7 +626,7 @@ pub struct ClosingSigned {
 	/// The proposed total fee for the closing transaction
 	pub fee_satoshis: u64,
 	/// A signature on the closing transaction
-	pub signature: Signature,
+	pub signature: schnorr::Signature,
 	/// The minimum and maximum fees which the sender is willing to accept, provided only by new
 	/// nodes.
 	pub fee_range: Option<ClosingSignedFeeRange>,
@@ -716,7 +717,7 @@ pub struct CommitmentSigned {
 	/// The channel ID
 	pub channel_id: ChannelId,
 	/// A signature on the commitment transaction
-	pub signature: Signature,
+	pub signature: schnorr::Signature,
 	/// Signatures on the HTLC transactions
 	pub htlc_signatures: Vec<Signature>,
 	#[cfg(taproot)]

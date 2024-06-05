@@ -1408,7 +1408,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 		&self, commitment_tx: &CommitmentTransaction,
 		_inbound_htlc_preimages: Vec<PaymentPreimage>,
 		_outbound_htlc_preimages: Vec<PaymentPreimage>, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<(Signature, Vec<Signature>), ()> {
+	) -> Result<(schnorr::Signature, Vec<Signature>), ()> {
 		let trusted_tx = commitment_tx.trust();
 		let keys = trusted_tx.keys();
 
@@ -1470,7 +1470,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 
 	fn sign_holder_commitment(
 		&self, commitment_tx: &HolderCommitmentTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
 		let funding_pubkey = PublicKey::from_secret_key(secp_ctx, &self.funding_key);
 		let counterparty_keys = self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR);
 		let funding_redeemscript =
@@ -1647,7 +1647,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 
 	fn sign_closing_transaction(
 		&self, closing_tx: &ClosingTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
 		let funding_pubkey = PublicKey::from_secret_key(secp_ctx, &self.funding_key);
 		let counterparty_funding_key =
 			&self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR).funding_pubkey;

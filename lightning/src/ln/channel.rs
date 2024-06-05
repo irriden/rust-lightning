@@ -14,6 +14,7 @@ use bitcoin::sighash;
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::consensus::encode;
 use bitcoin::key::XOnlyPublicKey;
+use bitcoin::taproot;
 
 use bitcoin::hashes::Hash;
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -22,7 +23,7 @@ use bitcoin::hash_types::{Txid, BlockHash};
 
 use bitcoin::secp256k1::constants::PUBLIC_KEY_SIZE;
 use bitcoin::secp256k1::{PublicKey,SecretKey};
-use bitcoin::secp256k1::{Secp256k1,ecdsa::Signature};
+use bitcoin::secp256k1::{Secp256k1,ecdsa::Signature, schnorr};
 use bitcoin::secp256k1;
 
 use crate::ln::types::{ChannelId, PaymentPreimage, PaymentHash};
@@ -1366,7 +1367,7 @@ pub(super) struct ChannelContext<SP: Deref> where SP::Target: SignerProvider {
 	/// Max to_local and to_remote outputs in a remote-generated commitment transaction
 	counterparty_max_commitment_tx_output: Mutex<(u64, u64)>,
 
-	last_sent_closing_fee: Option<(u64, Signature)>, // (fee, holder_sig)
+	last_sent_closing_fee: Option<(u64, schnorr::Signature)>, // (fee, holder_sig)
 	target_closing_feerate_sats_per_kw: Option<u32>,
 
 	/// If our counterparty sent us a closing_signed while we were waiting for a `ChannelMonitor`
@@ -5896,21 +5897,26 @@ impl<SP: Deref> Channel<SP> where
 		Ok((shutdown, monitor_update, dropped_outbound_htlcs))
 	}
 
-	fn build_signed_closing_transaction(&self, closing_tx: &ClosingTransaction, counterparty_sig: &Signature, sig: &Signature) -> Transaction {
+	fn build_signed_closing_transaction(&self, closing_tx: &ClosingTransaction, counterparty_sig: &schnorr::Signature, sig: &schnorr::Signature) -> Transaction {
 		let mut tx = closing_tx.trust().built_transaction().clone();
 
 		let funding_key = self.context.get_holder_pubkeys().funding_pubkey.serialize();
 		let counterparty_funding_key = self.context.counterparty_funding_pubkey().serialize();
-		let mut holder_sig = sig.serialize_der().to_vec();
-		holder_sig.push(EcdsaSighashType::All as u8);
-		let mut cp_sig = counterparty_sig.serialize_der().to_vec();
-		cp_sig.push(EcdsaSighashType::All as u8);
+		let holder_sig = taproot::Signature {
+			sig: sig.clone(),
+			hash_ty: sighash::TapSighashType::Default,
+		};
+		let cp_sig = taproot::Signature {
+			sig: counterparty_sig.clone(),
+			hash_ty: sighash::TapSighashType::Default,
+		};
+
 		if funding_key[..] < counterparty_funding_key[..] {
-			tx.input[0].witness.push(cp_sig);
-			tx.input[0].witness.push(holder_sig);
+			tx.input[0].witness.push(cp_sig.to_vec());
+			tx.input[0].witness.push(holder_sig.to_vec());
 		} else {
-			tx.input[0].witness.push(holder_sig);
-			tx.input[0].witness.push(cp_sig);
+			tx.input[0].witness.push(holder_sig.to_vec());
+			tx.input[0].witness.push(cp_sig.to_vec());
 		}
 
 		let s = self.context.get_funding_redeemscript();

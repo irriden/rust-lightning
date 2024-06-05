@@ -33,7 +33,7 @@ use crate::util::transaction_utils;
 
 use bitcoin::blockdata::locktime::absolute::LockTime;
 use bitcoin::secp256k1::{SecretKey, PublicKey, Scalar};
-use bitcoin::secp256k1::{Secp256k1, ecdsa::Signature, Message};
+use bitcoin::secp256k1::{Secp256k1, ecdsa::Signature, Message, KeyPair, schnorr};
 use bitcoin::{secp256k1, Sequence, Witness};
 use bitcoin::PublicKey as BitcoinPublicKey;
 
@@ -45,7 +45,7 @@ use crate::ln::channel::{INITIAL_COMMITMENT_NUMBER, ANCHOR_OUTPUT_VALUE_SATOSHI}
 use core::ops::Deref;
 use crate::chain;
 use crate::ln::features::ChannelTypeFeatures;
-use crate::crypto::utils::{sign, sign_with_aux_rand};
+use crate::crypto::utils::{sign, sign_with_aux_rand, sign_schnorr};
 use super::channel_keys::{DelayedPaymentBasepoint, DelayedPaymentKey, HtlcKey, HtlcBasepoint, RevocationKey, RevocationBasepoint};
 
 #[allow(unused_imports)]
@@ -1060,7 +1060,7 @@ impl HolderCommitmentTransaction {
 		}
 	}
 
-	pub(crate) fn add_holder_sig(&self, funding_redeemscript: &Script, holder_sig: Signature) -> Transaction {
+	pub(crate) fn add_holder_sig(&self, funding_redeemscript: &Script, holder_sig: schnorr::Signature) -> Transaction {
 		let mut tx = self.inner.built.transaction.clone();
 		if self.holder_sig_first {
 			tx.input[0].witness.push_bitcoin_signature(&self.counterparty_sig.serialize_der(), EcdsaSighashType::All);
@@ -1282,9 +1282,10 @@ impl<'a> TrustedClosingTransaction<'a> {
 
 	/// Sign a transaction, either because we are counter-signing the counterparty's transaction or
 	/// because we are about to broadcast a holder transaction.
-	pub fn sign<T: secp256k1::Signing + secp256k1::Verification>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Signature {
+	pub fn sign<T: secp256k1::Signing + secp256k1::Verification>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> schnorr::Signature {
 		let sighash = self.get_sighash_default(funding_redeemscript, channel_value_satoshis, &secp_ctx);
-		sign(secp_ctx, &sighash, funding_key)
+		let kp = KeyPair::from_secret_key(&secp_ctx,&funding_key);
+		sign_schnorr(secp_ctx, &sighash, &kp)
 	}
 }
 
