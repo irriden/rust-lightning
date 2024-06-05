@@ -2084,6 +2084,7 @@ pub(crate) mod tests {
 	use crate::events::{MessageSendEvent, MessageSendEventsProvider};
 	use crate::ln::channelmanager;
 	use crate::ln::chan_utils::make_funding_redeemscript;
+	use crate::ln::chan_utils::SIMPLE_TAPROOT_NUMS;
 	#[cfg(feature = "std")]
 	use crate::ln::features::InitFeatures;
 	use crate::routing::gossip::{P2PGossipSync, NetworkGraph, NetworkUpdate, NodeAlias, MAX_EXCESS_BYTES_FOR_RELAY, NodeId, RoutingFees, ChannelUpdateInfo, ChannelInfo, NodeAnnouncementInfo, NodeInfo};
@@ -2108,6 +2109,7 @@ pub(crate) mod tests {
 	use bitcoin::blockdata::transaction::TxOut;
 	use bitcoin::secp256k1::{PublicKey, SecretKey};
 	use bitcoin::secp256k1::{All, Secp256k1};
+	use bitcoin::key::XOnlyPublicKey;
 
 	use crate::io;
 	use bitcoin::secp256k1;
@@ -2195,7 +2197,7 @@ pub(crate) mod tests {
 		let node_1_btckey = SecretKey::from_slice(&[40; 32]).unwrap();
 		let node_2_btckey = SecretKey::from_slice(&[39; 32]).unwrap();
 		make_funding_redeemscript(&PublicKey::from_secret_key(secp_ctx, &node_1_btckey),
-			&PublicKey::from_secret_key(secp_ctx, &node_2_btckey)).to_v0_p2wsh()
+			&PublicKey::from_secret_key(secp_ctx, &node_2_btckey)).to_v1_p2tr(&secp_ctx, XOnlyPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap())
 	}
 
 	pub(crate) fn get_signed_channel_update<F: Fn(&mut UnsignedChannelUpdate)>(f: F, node_key: &SecretKey, secp_ctx: &Secp256k1<secp256k1::All>) -> ChannelUpdate {
