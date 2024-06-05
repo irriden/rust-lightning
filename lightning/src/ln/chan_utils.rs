@@ -1061,19 +1061,29 @@ impl HolderCommitmentTransaction {
 	}
 
 	pub(crate) fn add_holder_sig(&self, funding_redeemscript: &Script, holder_sig: Signature) -> Transaction {
-		// First push the multisig dummy, note that due to BIP147 (NULLDUMMY) it must be a zero-length element.
 		let mut tx = self.inner.built.transaction.clone();
-		tx.input[0].witness.push(Vec::new());
-
 		if self.holder_sig_first {
-			tx.input[0].witness.push_bitcoin_signature(&holder_sig.serialize_der(), EcdsaSighashType::All);
 			tx.input[0].witness.push_bitcoin_signature(&self.counterparty_sig.serialize_der(), EcdsaSighashType::All);
+			tx.input[0].witness.push_bitcoin_signature(&holder_sig.serialize_der(), EcdsaSighashType::All);
 		} else {
-			tx.input[0].witness.push_bitcoin_signature(&self.counterparty_sig.serialize_der(), EcdsaSighashType::All);
 			tx.input[0].witness.push_bitcoin_signature(&holder_sig.serialize_der(), EcdsaSighashType::All);
+			tx.input[0].witness.push_bitcoin_signature(&self.counterparty_sig.serialize_der(), EcdsaSighashType::All);
 		}
 
 		tx.input[0].witness.push(funding_redeemscript.as_bytes().to_vec());
+
+		let leaf_hash = funding_redeemscript.tapscript_leaf_hash();
+		let root = bitcoin::taproot::TapNodeHash::from(leaf_hash);
+		let nums = bitcoin::key::UntweakedPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap();
+		let mut ctrl = Vec::new();
+		use bitcoin::key::TapTweak;
+		let secp_ctx = Secp256k1::new();
+		match nums.tap_tweak(&secp_ctx, Some(root)) {
+			(_, bitcoin::key::Parity::Even) => ctrl.push(0xc0),
+			(_, bitcoin::key::Parity::Odd) => ctrl.push(0xc1),
+		}
+		ctrl.extend_from_slice(&nums.serialize());
+		tx.input[0].witness.push(ctrl);
 		tx
 	}
 }
@@ -1104,18 +1114,35 @@ impl BuiltCommitmentTransaction {
 		hash_to_message!(sighash)
 	}
 
+	/// Get the SIGHASH_DEFAULT sighash value of the transaction.
+	/// Only to be used with taproot channels
+	pub fn get_sighash_default<T: secp256k1::Verification>(&self, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Message {
+		use bitcoin::{TxOut, Amount, key::XOnlyPublicKey};
+		use sighash::{Prevouts, SighashCache, TapSighashType};
+
+		let prevout = &[TxOut {
+			value: channel_value_satoshis,
+			script_pubkey: funding_redeemscript.to_v1_p2tr(&secp_ctx, XOnlyPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap()),
+		}];
+		let prevout = Prevouts::All(prevout);
+		let leaf_hash = funding_redeemscript.tapscript_leaf_hash();
+		let mut sighasher = sighash::SighashCache::new(&self.transaction);
+		let sighash = &sighasher.taproot_script_spend_signature_hash(0, &prevout, leaf_hash, TapSighashType::Default).unwrap()[..];
+		hash_to_message!(sighash)
+	}
+
 	/// Signs the counterparty's commitment transaction.
-	pub fn sign_counterparty_commitment<T: secp256k1::Signing>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Signature {
-		let sighash = self.get_sighash_all(funding_redeemscript, channel_value_satoshis);
+	pub fn sign_counterparty_commitment<T: secp256k1::Signing + secp256k1::Verification>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Signature {
+		let sighash = self.get_sighash_default(funding_redeemscript, channel_value_satoshis, &secp_ctx);
 		sign(secp_ctx, &sighash, funding_key)
 	}
 
 	/// Signs the holder commitment transaction because we are about to broadcast it.
-	pub fn sign_holder_commitment<T: secp256k1::Signing, ES: Deref>(
+	pub fn sign_holder_commitment<T: secp256k1::Signing + secp256k1::Verification, ES: Deref>(
 		&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64,
 		entropy_source: &ES, secp_ctx: &Secp256k1<T>
 	) -> Signature where ES::Target: EntropySource {
-		let sighash = self.get_sighash_all(funding_redeemscript, channel_value_satoshis);
+		let sighash = self.get_sighash_default(funding_redeemscript, channel_value_satoshis, &secp_ctx);
 		sign_with_aux_rand(secp_ctx, &sighash, funding_key, entropy_source)
 	}
 }
@@ -1236,10 +1263,27 @@ impl<'a> TrustedClosingTransaction<'a> {
 		hash_to_message!(sighash)
 	}
 
+	/// Get the SIGHASH_DEFAULT sighash value of the transaction.
+	/// Only to be used with taproot channels
+	pub fn get_sighash_default<T: secp256k1::Verification>(&self, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Message {
+		use bitcoin::{TxOut, Amount, key::XOnlyPublicKey};
+		use sighash::{Prevouts, SighashCache, TapSighashType};
+
+		let prevout = &[TxOut {
+			value: channel_value_satoshis,
+			script_pubkey: funding_redeemscript.to_v1_p2tr(&secp_ctx, XOnlyPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap()),
+		}];
+		let prevout = Prevouts::All(prevout);
+		let leaf_hash = funding_redeemscript.tapscript_leaf_hash();
+		let mut sighasher = sighash::SighashCache::new(&self.inner.built);
+		let sighash = &sighasher.taproot_script_spend_signature_hash(0, &prevout, leaf_hash, TapSighashType::Default).unwrap()[..];
+		hash_to_message!(sighash)
+	}
+
 	/// Sign a transaction, either because we are counter-signing the counterparty's transaction or
 	/// because we are about to broadcast a holder transaction.
-	pub fn sign<T: secp256k1::Signing>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Signature {
-		let sighash = self.get_sighash_all(funding_redeemscript, channel_value_satoshis);
+	pub fn sign<T: secp256k1::Signing + secp256k1::Verification>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Signature {
+		let sighash = self.get_sighash_default(funding_redeemscript, channel_value_satoshis, &secp_ctx);
 		sign(secp_ctx, &sighash, funding_key)
 	}
 }
