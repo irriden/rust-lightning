@@ -4389,10 +4389,10 @@ impl<SP: Deref> Channel<SP> where
 			let sighash = bitcoin_tx.get_sighash_default(&funding_script, self.context.channel_value_satoshis, &self.context.secp_ctx);
 
 			log_trace!(logger, "Checking commitment tx signature {} by key {} against tx {} (sighash {}) with redeemscript {} in channel {}",
-				log_bytes!(msg.signature.serialize_compact()[..]),
+				log_bytes!(*msg.signature.as_ref()),
 				log_bytes!(self.context.counterparty_funding_pubkey().serialize()), encode::serialize_hex(&bitcoin_tx.transaction),
 				log_bytes!(sighash[..]), encode::serialize_hex(&funding_script), &self.context.channel_id());
-			if let Err(_) = self.context.secp_ctx.verify_ecdsa(&sighash, &msg.signature, &self.context.counterparty_funding_pubkey()) {
+			if let Err(_) = self.context.secp_ctx.verify_schnorr(&msg.signature, &sighash, &self.context.counterparty_funding_pubkey().x_only_public_key().0) {
 				return Err(ChannelError::Close("Invalid commitment tx signature from peer".to_owned()));
 			}
 			bitcoin_tx.txid
@@ -5970,14 +5970,14 @@ impl<SP: Deref> Channel<SP> where
 		}
 		let sighash = closing_tx.trust().get_sighash_default(&funding_redeemscript, self.context.channel_value_satoshis, &self.context.secp_ctx);
 
-		match self.context.secp_ctx.verify_ecdsa(&sighash, &msg.signature, &self.context.get_counterparty_pubkeys().funding_pubkey) {
+		match self.context.secp_ctx.verify_schnorr(&msg.signature, &sighash, &self.context.get_counterparty_pubkeys().funding_pubkey.x_only_public_key().0) {
 			Ok(_) => {},
 			Err(_e) => {
 				// The remote end may have decided to revoke their output due to inconsistent dust
 				// limits, so check for that case by re-checking the signature here.
 				closing_tx = self.build_closing_transaction(msg.fee_satoshis, true).0;
 				let sighash = closing_tx.trust().get_sighash_default(&funding_redeemscript, self.context.channel_value_satoshis, &self.context.secp_ctx);
-				secp_check!(self.context.secp_ctx.verify_ecdsa(&sighash, &msg.signature, self.context.counterparty_funding_pubkey()), "Invalid closing tx signature from peer".to_owned());
+				secp_check!(self.context.secp_ctx.verify_schnorr(&msg.signature, &sighash, &self.context.counterparty_funding_pubkey().x_only_public_key().0), "Invalid closing tx signature from peer".to_owned());
 			},
 		};
 
@@ -7210,7 +7210,7 @@ impl<SP: Deref> Channel<SP> where
 					log_trace!(logger, "Signed remote commitment tx {} (txid {}) with redeemscript {} -> {} in channel {}",
 						encode::serialize_hex(&commitment_stats.tx.trust().built_transaction().transaction),
 						&counterparty_commitment_txid, encode::serialize_hex(&self.context.get_funding_redeemscript()),
-						log_bytes!(signature.serialize_compact()[..]), &self.context.channel_id());
+						log_bytes!(*signature.as_ref()), &self.context.channel_id());
 
 					for (ref htlc_sig, ref htlc) in htlc_signatures.iter().zip(htlcs) {
 						log_trace!(logger, "Signed remote HTLC tx {} with redeemscript {} with pubkey {} -> {} in channel {}",
@@ -7755,7 +7755,7 @@ impl<SP: Deref> OutboundV1Channel<SP> where SP::Target: SignerProvider {
 			let initial_commitment_bitcoin_tx = trusted_tx.built_transaction();
 			let sighash = initial_commitment_bitcoin_tx.get_sighash_default(&funding_script, self.context.channel_value_satoshis, &self.context.secp_ctx);
 			// They sign our commitment transaction, allowing us to broadcast the tx if we wish.
-			if let Err(_) = self.context.secp_ctx.verify_ecdsa(&sighash, &msg.signature, &self.context.get_counterparty_pubkeys().funding_pubkey) {
+			if let Err(_) = self.context.secp_ctx.verify_schnorr(&msg.signature, &sighash, &self.context.get_counterparty_pubkeys().funding_pubkey.x_only_public_key().0) {
 				return Err((self, ChannelError::Close("Invalid funding_signed signature from peer".to_owned())));
 			}
 		}
@@ -7990,7 +7990,7 @@ impl<SP: Deref> InboundV1Channel<SP> where SP::Target: SignerProvider {
 		self.generate_accept_channel_message()
 	}
 
-	fn check_funding_created_signature<L: Deref>(&mut self, sig: &Signature, logger: &L) -> Result<CommitmentTransaction, ChannelError> where L::Target: Logger {
+	fn check_funding_created_signature<L: Deref>(&mut self, sig: &schnorr::Signature, logger: &L) -> Result<CommitmentTransaction, ChannelError> where L::Target: Logger {
 		let funding_script = self.context.get_funding_redeemscript();
 
 		let keys = self.context.build_holder_transaction_keys(self.context.cur_holder_commitment_transaction_number);
@@ -8000,10 +8000,10 @@ impl<SP: Deref> InboundV1Channel<SP> where SP::Target: SignerProvider {
 		let sighash = initial_commitment_bitcoin_tx.get_sighash_default(&funding_script, self.context.channel_value_satoshis, &self.context.secp_ctx);
 		// They sign the holder commitment transaction...
 		log_trace!(logger, "Checking funding_created tx signature {} by key {} against tx {} (sighash {}) with redeemscript {} for channel {}.",
-			log_bytes!(sig.serialize_compact()[..]), log_bytes!(self.context.counterparty_funding_pubkey().serialize()),
+			log_bytes!(*sig.as_ref()), log_bytes!(self.context.counterparty_funding_pubkey().serialize()),
 			encode::serialize_hex(&initial_commitment_bitcoin_tx.transaction), log_bytes!(sighash[..]),
 			encode::serialize_hex(&funding_script), &self.context.channel_id());
-		secp_check!(self.context.secp_ctx.verify_ecdsa(&sighash, &sig, self.context.counterparty_funding_pubkey()), "Invalid funding_created signature from peer".to_owned());
+		secp_check!(self.context.secp_ctx.verify_schnorr(&sig, &sighash, &self.context.counterparty_funding_pubkey().x_only_public_key().0), "Invalid funding_created signature from peer".to_owned());
 
 		Ok(initial_commitment_tx)
 	}

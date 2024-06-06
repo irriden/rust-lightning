@@ -36,6 +36,7 @@ use bitcoin::secp256k1::{SecretKey, PublicKey, Scalar};
 use bitcoin::secp256k1::{Secp256k1, ecdsa::Signature, Message, KeyPair, schnorr};
 use bitcoin::{secp256k1, Sequence, Witness};
 use bitcoin::PublicKey as BitcoinPublicKey;
+use bitcoin::taproot;
 
 use crate::io;
 use core::cmp;
@@ -977,7 +978,7 @@ impl<'a> DirectedChannelTransactionParameters<'a> {
 pub struct HolderCommitmentTransaction {
 	inner: CommitmentTransaction,
 	/// Our counterparty's signature for the transaction
-	pub counterparty_sig: Signature,
+	pub counterparty_sig: schnorr::Signature,
 	/// All non-dust counterparty HTLC signatures, in the order they appear in the transaction
 	pub counterparty_htlc_sigs: Vec<Signature>,
 	// Which order the signatures should go in when constructing the final commitment tx witness.
@@ -1012,6 +1013,7 @@ impl HolderCommitmentTransaction {
 		let secp_ctx = Secp256k1::new();
 		let dummy_key = PublicKey::from_secret_key(&secp_ctx, &SecretKey::from_slice(&[42; 32]).unwrap());
 		let dummy_sig = sign(&secp_ctx, &secp256k1::Message::from_slice(&[42; 32]).unwrap(), &SecretKey::from_slice(&[42; 32]).unwrap());
+		let dummy_schnorr_sig = sign_schnorr(&secp_ctx, &secp256k1::Message::from_slice(&[42; 32]).unwrap(), &KeyPair::from_seckey_slice(&secp_ctx, &[42; 32]).unwrap());
 
 		let keys = TxCreationKeys {
 			per_commitment_point: dummy_key.clone(),
@@ -1043,7 +1045,7 @@ impl HolderCommitmentTransaction {
 		htlcs.sort_by_key(|htlc| htlc.0.transaction_output_index);
 		HolderCommitmentTransaction {
 			inner,
-			counterparty_sig: dummy_sig,
+			counterparty_sig: dummy_schnorr_sig,
 			counterparty_htlc_sigs,
 			holder_sig_first: false
 		}
@@ -1051,7 +1053,7 @@ impl HolderCommitmentTransaction {
 
 	/// Create a new holder transaction with the given counterparty signatures.
 	/// The funding keys are used to figure out which signature should go first when building the transaction for broadcast.
-	pub fn new(commitment_tx: CommitmentTransaction, counterparty_sig: Signature, counterparty_htlc_sigs: Vec<Signature>, holder_funding_key: &PublicKey, counterparty_funding_key: &PublicKey) -> Self {
+	pub fn new(commitment_tx: CommitmentTransaction, counterparty_sig: schnorr::Signature, counterparty_htlc_sigs: Vec<Signature>, holder_funding_key: &PublicKey, counterparty_funding_key: &PublicKey) -> Self {
 		Self {
 			inner: commitment_tx,
 			counterparty_sig,
@@ -1062,12 +1064,20 @@ impl HolderCommitmentTransaction {
 
 	pub(crate) fn add_holder_sig(&self, funding_redeemscript: &Script, holder_sig: schnorr::Signature) -> Transaction {
 		let mut tx = self.inner.built.transaction.clone();
+		let hs = taproot::Signature {
+			sig: holder_sig,
+			hash_ty: sighash::TapSighashType::Default,
+		};
+		let cs = taproot::Signature {
+			sig: self.counterparty_sig.clone(),
+			hash_ty: sighash::TapSighashType::Default,
+		};
 		if self.holder_sig_first {
-			tx.input[0].witness.push_bitcoin_signature(&self.counterparty_sig.serialize_der(), EcdsaSighashType::All);
-			tx.input[0].witness.push_bitcoin_signature(&holder_sig.serialize_der(), EcdsaSighashType::All);
+			tx.input[0].witness.push(cs.to_vec());
+			tx.input[0].witness.push(hs.to_vec());
 		} else {
-			tx.input[0].witness.push_bitcoin_signature(&holder_sig.serialize_der(), EcdsaSighashType::All);
-			tx.input[0].witness.push_bitcoin_signature(&self.counterparty_sig.serialize_der(), EcdsaSighashType::All);
+			tx.input[0].witness.push(hs.to_vec());
+			tx.input[0].witness.push(cs.to_vec());
 		}
 
 		tx.input[0].witness.push(funding_redeemscript.as_bytes().to_vec());
@@ -1117,8 +1127,8 @@ impl BuiltCommitmentTransaction {
 	/// Get the SIGHASH_DEFAULT sighash value of the transaction.
 	/// Only to be used with taproot channels
 	pub fn get_sighash_default<T: secp256k1::Verification>(&self, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Message {
-		use bitcoin::{TxOut, Amount, key::XOnlyPublicKey};
-		use sighash::{Prevouts, SighashCache, TapSighashType};
+		use bitcoin::{TxOut, key::XOnlyPublicKey};
+		use sighash::{Prevouts, TapSighashType};
 
 		let prevout = &[TxOut {
 			value: channel_value_satoshis,
@@ -1132,18 +1142,18 @@ impl BuiltCommitmentTransaction {
 	}
 
 	/// Signs the counterparty's commitment transaction.
-	pub fn sign_counterparty_commitment<T: secp256k1::Signing + secp256k1::Verification>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Signature {
+	pub fn sign_counterparty_commitment<T: secp256k1::Signing + secp256k1::Verification>(&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> schnorr::Signature {
 		let sighash = self.get_sighash_default(funding_redeemscript, channel_value_satoshis, &secp_ctx);
-		sign(secp_ctx, &sighash, funding_key)
+		sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(&secp_ctx, &funding_key))
 	}
 
 	/// Signs the holder commitment transaction because we are about to broadcast it.
 	pub fn sign_holder_commitment<T: secp256k1::Signing + secp256k1::Verification, ES: Deref>(
 		&self, funding_key: &SecretKey, funding_redeemscript: &Script, channel_value_satoshis: u64,
-		entropy_source: &ES, secp_ctx: &Secp256k1<T>
-	) -> Signature where ES::Target: EntropySource {
+		_entropy_source: &ES, secp_ctx: &Secp256k1<T>
+	) -> schnorr::Signature where ES::Target: EntropySource {
 		let sighash = self.get_sighash_default(funding_redeemscript, channel_value_satoshis, &secp_ctx);
-		sign_with_aux_rand(secp_ctx, &sighash, funding_key, entropy_source)
+		sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(&secp_ctx, &funding_key))
 	}
 }
 
