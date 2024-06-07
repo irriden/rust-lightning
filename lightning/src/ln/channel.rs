@@ -5900,8 +5900,8 @@ impl<SP: Deref> Channel<SP> where
 	fn build_signed_closing_transaction(&self, closing_tx: &ClosingTransaction, counterparty_sig: &schnorr::Signature, sig: &schnorr::Signature) -> Transaction {
 		let mut tx = closing_tx.trust().built_transaction().clone();
 
-		let funding_key = self.context.get_holder_pubkeys().funding_pubkey.serialize();
-		let counterparty_funding_key = self.context.counterparty_funding_pubkey().serialize();
+		let funding_key = self.context.get_holder_pubkeys().funding_pubkey.x_only_public_key().0.serialize();
+		let counterparty_funding_key = self.context.counterparty_funding_pubkey().x_only_public_key().0.serialize();
 		let holder_sig = taproot::Signature {
 			sig: sig.clone(),
 			hash_ty: sighash::TapSighashType::Default,
