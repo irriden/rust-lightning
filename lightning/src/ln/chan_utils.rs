@@ -16,7 +16,6 @@ use bitcoin::blockdata::transaction::{TxIn,TxOut,OutPoint,Transaction};
 use bitcoin::sighash;
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::address::Payload;
-use bitcoin::key::UntweakedPublicKey;
 
 use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
@@ -46,7 +45,7 @@ use crate::ln::channel::{INITIAL_COMMITMENT_NUMBER, ANCHOR_OUTPUT_VALUE_SATOSHI}
 use core::ops::Deref;
 use crate::chain;
 use crate::ln::features::ChannelTypeFeatures;
-use crate::crypto::utils::{sign, sign_with_aux_rand, sign_schnorr};
+use crate::crypto::utils::{sign_with_aux_rand, sign_schnorr};
 use super::channel_keys::{DelayedPaymentBasepoint, DelayedPaymentKey, HtlcKey, HtlcBasepoint, RevocationKey, RevocationBasepoint};
 
 #[allow(unused_imports)]
@@ -286,7 +285,7 @@ impl CounterpartyCommitmentSecrets {
 	}
 
 	#[inline]
-	fn derive_secret(secret: [u8; 32], bits: u8, idx: u64) -> [u8; 32] {
+	fn _derive_secret(_secret: [u8; 32], _bits: u8, _idx: u64) -> [u8; 32] {
 		todo!();
 	}
 
@@ -295,7 +294,7 @@ impl CounterpartyCommitmentSecrets {
 	pub fn provide_secret(&mut self, idx: u64, secret: [u8; 32]) -> Result<(), ()> {
 		let pos = Self::place_secret(idx);
 		println!("inserting secret at position {}", pos);
-		self.old_secrets[pos] = (Some(secret));
+		self.old_secrets[pos] = Some(secret);
 		Ok(())
 	}
 
@@ -310,12 +309,18 @@ impl CounterpartyCommitmentSecrets {
 
 impl Writeable for CounterpartyCommitmentSecrets {
 	fn write<W: Writer>(&self, writer: &mut W) -> Result<(), io::Error> {
+		// TODO: review this
+		self.old_secrets.iter().filter_map(|secret| secret.as_ref()).for_each(|s| writer.write_all(s).unwrap());
 		Ok(())
 	}
 }
 impl Readable for CounterpartyCommitmentSecrets {
-	fn read<R: io::Read>(reader: &mut R) -> Result<Self, DecodeError> {
-		todo!();
+	fn read<R: io::Read>(_reader: &mut R) -> Result<Self, DecodeError> {
+		// TODO: gotta fix this here
+		let db = CounterpartyCommitmentSecrets {
+			old_secrets: [None; 100],
+		};
+		Ok(db)
 	}
 }
 
@@ -1058,7 +1063,7 @@ impl HolderCommitmentTransaction {
 			inner: commitment_tx,
 			counterparty_sig,
 			counterparty_htlc_sigs,
-			holder_sig_first: holder_funding_key.serialize()[..] < counterparty_funding_key.serialize()[..],
+			holder_sig_first: holder_funding_key.x_only_public_key().0.serialize()[..] < counterparty_funding_key.x_only_public_key().0.serialize()[..],
 		}
 	}
 
@@ -1276,8 +1281,8 @@ impl<'a> TrustedClosingTransaction<'a> {
 	/// Get the SIGHASH_DEFAULT sighash value of the transaction.
 	/// Only to be used with taproot channels
 	pub fn get_sighash_default<T: secp256k1::Verification>(&self, funding_redeemscript: &Script, channel_value_satoshis: u64, secp_ctx: &Secp256k1<T>) -> Message {
-		use bitcoin::{TxOut, Amount, key::XOnlyPublicKey};
-		use sighash::{Prevouts, SighashCache, TapSighashType};
+		use bitcoin::{TxOut, key::XOnlyPublicKey};
+		use sighash::{Prevouts, TapSighashType};
 
 		let prevout = &[TxOut {
 			value: channel_value_satoshis,
