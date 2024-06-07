@@ -490,6 +490,28 @@ pub fn get_revokeable_redeemscript(revocation_key: &RevocationKey, contest_delay
 	res
 }
 
+/// Taproot version of the revokeable info, see roasbeef
+pub fn get_taproot_revokeable_info(revocation_key: &RevocationKey, contest_delay: u16, broadcaster_delayed_payment_key: &DelayedPaymentKey) -> taproot::TaprootSpendInfo {
+	let to_delay_script = Builder::new()
+	              .push_slice(&broadcaster_delayed_payment_key.to_public_key().x_only_public_key().0.serialize())
+	              .push_opcode(opcodes::all::OP_CHECKSIG)
+	              .push_int(contest_delay as i64)
+	              .push_opcode(opcodes::all::OP_CSV)
+	              .push_opcode(opcodes::all::OP_DROP)
+				  .into_script();
+	let revoke_script = Builder::new()
+	              .push_slice(&broadcaster_delayed_payment_key.to_public_key().x_only_public_key().0.serialize())
+	              .push_opcode(opcodes::all::OP_DROP)
+	              .push_slice(&revocation_key.to_public_key().x_only_public_key().0.serialize())
+	              .push_opcode(opcodes::all::OP_CHECKSIG)
+	              .into_script();
+	let spend_info = taproot::TaprootBuilder::new()
+	              .add_leaf(1u8, to_delay_script.clone()).unwrap()
+	              .add_leaf(1u8, revoke_script.clone()).unwrap()
+	              .finalize(&Secp256k1::new(), bitcoin::key::XOnlyPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap()).unwrap();
+	spend_info
+}
+
 /// Returns the script for the counterparty's output on a holder's commitment transaction based on
 /// the channel type.
 pub fn get_counterparty_payment_script(channel_type_features: &ChannelTypeFeatures, payment_key: &PublicKey) -> ScriptBuf {
@@ -685,8 +707,9 @@ pub(crate) fn build_htlc_output(
 		htlc.amount_msat / 1000 - total_fee
 	};
 
+	let taproot_spend_info = get_taproot_revokeable_info(revocation_key, contest_delay, broadcaster_delayed_payment_key);
 	TxOut {
-		script_pubkey: get_revokeable_redeemscript(revocation_key, contest_delay, broadcaster_delayed_payment_key).to_v0_p2wsh(),
+		script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key()),
 		value: output_value,
 	}
 }
@@ -1480,14 +1503,14 @@ impl CommitmentTransaction {
 		}
 
 		if to_broadcaster_value_sat > 0 {
-			let redeem_script = get_revokeable_redeemscript(
+			let taproot_spend_info = get_taproot_revokeable_info(
 				&keys.revocation_key,
 				contest_delay,
 				&keys.broadcaster_delayed_payment_key,
 			);
 			txouts.push((
 				TxOut {
-					script_pubkey: redeem_script.to_v0_p2wsh(),
+					script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key()),
 					value: to_broadcaster_value_sat,
 				},
 				None,
@@ -1758,15 +1781,15 @@ impl<'a> TrustedCommitmentTransaction<'a> {
 	/// commitment transaction previously didn't contain enough information to locate the
 	/// revokeable output.
 	pub fn revokeable_output_index(&self) -> Option<usize> {
-		let revokeable_redeemscript = get_revokeable_redeemscript(
+		let taproot_spend_info = get_taproot_revokeable_info(
 			&self.keys.revocation_key,
 			self.to_broadcaster_delay?,
 			&self.keys.broadcaster_delayed_payment_key,
 		);
-		let revokeable_p2wsh = revokeable_redeemscript.to_v0_p2wsh();
+		let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 		let outputs = &self.inner.built.transaction.output;
 		outputs.iter().enumerate()
-			.find(|(_, out)| out.script_pubkey == revokeable_p2wsh)
+			.find(|(_, out)| out.script_pubkey == revokeable_p2tr)
 			.map(|(idx, _)| idx)
 	}
 

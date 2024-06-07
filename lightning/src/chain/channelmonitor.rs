@@ -3197,14 +3197,20 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 			&self.holder_revocation_basepoint, &their_per_commitment_point);
 		let delayed_key = DelayedPaymentKey::from_basepoint(&self.onchain_tx_handler.secp_ctx,
 			&self.counterparty_commitment_params.counterparty_delayed_payment_base_key, &their_per_commitment_point);
-		let revokeable_redeemscript = chan_utils::get_revokeable_redeemscript(&revocation_pubkey,
+		let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&revocation_pubkey,
 			self.counterparty_commitment_params.on_counterparty_tx_csv, &delayed_key);
+		// FIX: this nth 0 here is brittle. we are lucky that the scripts yield stable ordering in
+		// this one case
+		// The revoke script will always come first, because OP_DROP == 0x75, and OP_CHECKSIG ==
+		// 0xac, and both of these opcodes are prefixed by the same local delayed pubkey
+		let revoke_script = taproot_spend_info.as_script_map().iter().nth(0).unwrap().0;
+		let ctrl = taproot_spend_info.control_block(revoke_script).unwrap();
 
 		let sig = self.onchain_tx_handler.signer.sign_justice_revoked_output(
 			&justice_tx, input_idx, value, &per_commitment_key, &self.onchain_tx_handler.secp_ctx)?;
 		justice_tx.input[input_idx].witness.push_bitcoin_signature(&sig.serialize_der(), EcdsaSighashType::All);
-		justice_tx.input[input_idx].witness.push(&[1u8]);
-		justice_tx.input[input_idx].witness.push(revokeable_redeemscript.as_bytes());
+		justice_tx.input[input_idx].witness.push(revoke_script.0.as_bytes());
+		justice_tx.input[input_idx].witness.push(ctrl.serialize());
 		Ok(justice_tx)
 	}
 
@@ -3262,12 +3268,12 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 			let revocation_pubkey = RevocationKey::from_basepoint(&self.onchain_tx_handler.secp_ctx,  &self.holder_revocation_basepoint, &per_commitment_point,);
 			let delayed_key = DelayedPaymentKey::from_basepoint(&self.onchain_tx_handler.secp_ctx, &self.counterparty_commitment_params.counterparty_delayed_payment_base_key, &PublicKey::from_secret_key(&self.onchain_tx_handler.secp_ctx, &per_commitment_key));
 
-			let revokeable_redeemscript = chan_utils::get_revokeable_redeemscript(&revocation_pubkey, self.counterparty_commitment_params.on_counterparty_tx_csv, &delayed_key);
-			let revokeable_p2wsh = revokeable_redeemscript.to_v0_p2wsh();
+			let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&revocation_pubkey, self.counterparty_commitment_params.on_counterparty_tx_csv, &delayed_key);
+			let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 
 			// First, process non-htlc outputs (to_holder & to_counterparty)
 			for (idx, outp) in tx.output.iter().enumerate() {
-				if outp.script_pubkey == revokeable_p2wsh {
+				if outp.script_pubkey == revokeable_p2tr {
 					let revk_outp = RevokedOutput::build(per_commitment_point, self.counterparty_commitment_params.counterparty_delayed_payment_base_key, self.counterparty_commitment_params.counterparty_htlc_base_key, per_commitment_key, outp.value, self.counterparty_commitment_params.on_counterparty_tx_csv, self.onchain_tx_handler.channel_type_features().supports_anchors_zero_fee_htlc_tx());
 					let justice_package = PackageTemplate::build_package(commitment_txid, idx as u32, PackageSolvingData::RevokedOutput(revk_outp), height + self.counterparty_commitment_params.on_counterparty_tx_csv as u32, height);
 					claimable_outpoints.push(justice_package);
@@ -3381,11 +3387,12 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 
 			let delayed_key = DelayedPaymentKey::from_basepoint(&self.onchain_tx_handler.secp_ctx, &self.counterparty_commitment_params.counterparty_delayed_payment_base_key, &per_commitment_point);
 
-			let revokeable_p2wsh = chan_utils::get_revokeable_redeemscript(&revocation_pubkey,
+			let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&revocation_pubkey,
 				self.counterparty_commitment_params.on_counterparty_tx_csv,
-				&delayed_key).to_v0_p2wsh();
+				&delayed_key);
+			let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 			for (idx, outp) in transaction.output.iter().enumerate() {
-				if outp.script_pubkey == revokeable_p2wsh {
+				if outp.script_pubkey == revokeable_p2tr {
 					to_counterparty_output_info =
 						Some((idx.try_into().expect("Can't have > 2^32 outputs"), outp.value));
 				}
@@ -3478,8 +3485,9 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 	fn get_broadcasted_holder_claims(&self, holder_tx: &HolderSignedTx, conf_height: u32) -> (Vec<PackageTemplate>, Option<(ScriptBuf, PublicKey, RevocationKey)>) {
 		let mut claim_requests = Vec::with_capacity(holder_tx.htlc_outputs.len());
 
-		let redeemscript = chan_utils::get_revokeable_redeemscript(&holder_tx.revocation_key, self.on_holder_tx_csv, &holder_tx.delayed_payment_key);
-		let broadcasted_holder_revokable_script = Some((redeemscript.to_v0_p2wsh(), holder_tx.per_commitment_point.clone(), holder_tx.revocation_key.clone()));
+		let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&holder_tx.revocation_key, self.on_holder_tx_csv, &holder_tx.delayed_payment_key);
+		let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
+		let broadcasted_holder_revokable_script = Some((revokeable_p2tr, holder_tx.per_commitment_point.clone(), holder_tx.revocation_key.clone()));
 
 		for &(ref htlc, _, _) in holder_tx.htlc_outputs.iter() {
 			if let Some(transaction_output_index) = htlc.transaction_output_index {
