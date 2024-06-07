@@ -1087,17 +1087,9 @@ impl HolderCommitmentTransaction {
 
 		tx.input[0].witness.push(funding_redeemscript.as_bytes().to_vec());
 
-		let leaf_hash = funding_redeemscript.tapscript_leaf_hash();
-		let root = bitcoin::taproot::TapNodeHash::from(leaf_hash);
 		let nums = bitcoin::key::UntweakedPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap();
-		let mut ctrl = Vec::new();
-		use bitcoin::key::TapTweak;
-		let secp_ctx = Secp256k1::new();
-		match nums.tap_tweak(&secp_ctx, Some(root)) {
-			(_, bitcoin::key::Parity::Even) => ctrl.push(0xc0),
-			(_, bitcoin::key::Parity::Odd) => ctrl.push(0xc1),
-		}
-		ctrl.extend_from_slice(&nums.serialize());
+		let info = taproot::TaprootBuilder::new().add_leaf(0u8, funding_redeemscript.into()).unwrap().finalize(&Secp256k1::new(), nums).unwrap();
+		let ctrl = info.control_block(&(funding_redeemscript.into(), taproot::LeafVersion::TapScript)).unwrap().serialize();
 		tx.input[0].witness.push(ctrl);
 		tx
 	}

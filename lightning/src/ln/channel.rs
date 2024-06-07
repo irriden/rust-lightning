@@ -5922,16 +5922,9 @@ impl<SP: Deref> Channel<SP> where
 		let s = self.context.get_funding_redeemscript();
 		tx.input[0].witness.push(s.to_bytes());
 
-		let leaf_hash = s.tapscript_leaf_hash();
-		let root = bitcoin::taproot::TapNodeHash::from(leaf_hash);
 		let nums = bitcoin::key::UntweakedPublicKey::from_slice(&chan_utils::SIMPLE_TAPROOT_NUMS).unwrap();
-		let mut ctrl = Vec::new();
-		use bitcoin::key::TapTweak;
-		match nums.tap_tweak(&self.context.secp_ctx, Some(root)) {
-			(_, bitcoin::key::Parity::Even) => ctrl.push(0xc0),
-			(_, bitcoin::key::Parity::Odd) => ctrl.push(0xc1),
-		}
-		ctrl.extend_from_slice(&nums.serialize());
+		let info = taproot::TaprootBuilder::new().add_leaf(0u8, s.clone()).unwrap().finalize(&self.context.secp_ctx, nums).unwrap();
+		let ctrl = info.control_block(&(s, taproot::LeafVersion::TapScript)).unwrap().serialize();
 		tx.input[0].witness.push(ctrl);
 		tx
 	}
