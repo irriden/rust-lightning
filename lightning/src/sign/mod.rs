@@ -127,6 +127,12 @@ impl DelayedPaymentOutputDescriptor {
 	// redeemscript push length.
 	pub const MAX_WITNESS_LENGTH: u64 =
 		1 + 73 + 1 + chan_utils::REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH as u64 + 1;
+
+	/// Taproot version
+	// Calculated as 1 byte length + 64 byte signature, + redeemscript push length + 65 byte
+	// control block, in both a to_local, and a justice spend
+	pub const MAX_WITNESS_LENGTH_TRT: u64 =
+		1 + 64 + chan_utils::REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH_TRT as u64 + 1 + 32 + 32;
 }
 
 impl_writeable_tlv_based!(DelayedPaymentOutputDescriptor, {
@@ -488,12 +494,15 @@ impl SpendableOutputDescriptor {
 						sequence: Sequence(descriptor.to_self_delay as u32),
 						witness: Witness::new(),
 					});
-					witness_weight += DelayedPaymentOutputDescriptor::MAX_WITNESS_LENGTH;
+					witness_weight += DelayedPaymentOutputDescriptor::MAX_WITNESS_LENGTH_TRT;
+					/*
+					 * FIXME: taproot sigs are always 64 bytes
 					#[cfg(feature = "grind_signatures")]
 					{
 						// Guarantees a low R signature
 						witness_weight -= 1;
 					}
+					*/
 					input_value += descriptor.output.value;
 				},
 				SpendableOutputDescriptor::StaticOutput { ref outpoint, ref output, .. } => {
@@ -2306,12 +2315,21 @@ impl OutputSpender for KeysManager {
 
 		let spend_tx = psbt.extract_tx();
 
-		//debug_assert!(expected_max_weight >= spend_tx.weight().to_wu());
+		debug_assert!(expected_max_weight >= spend_tx.weight().to_wu());
 		// Note that witnesses with a signature vary somewhat in size, so allow
 		// `expected_max_weight` to overshoot by up to 3 bytes per input.
-		//debug_assert!(
-	//		expected_max_weight <= spend_tx.weight().to_wu() + descriptors.len() as u64 * 3
-//		);
+		/*
+		 * FIXME: bring back for backwards compatibility
+		debug_assert!(
+			expected_max_weight <= spend_tx.weight().to_wu() + descriptors.len() as u64 * 3
+		);
+		*/
+
+		// In taproot, difference in bytes between a to_local and a to_justice spend is 29:
+		// (33 + 1 + 33 + 1) - (33 + 1 + 3 + 1 + 1)
+		debug_assert!(
+			expected_max_weight <= spend_tx.weight().to_wu() + 29
+		);
 
 		Ok(spend_tx)
 	}

@@ -472,6 +472,10 @@ impl TxCreationKeys {
 // on-chain funds.
 pub const REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH: usize = 6 + 4 + 34*2;
 
+/// Taroot version
+/// max length is 2 pubkeys, 2 opcodes
+pub const REVOKEABLE_REDEEMSCRIPT_MAX_LENGTH_TRT: usize = 66 + 2;
+
 /// A script either spendable by the revocation
 /// key or the broadcaster_delayed_payment_key and satisfying the relative-locktime OP_CSV constrain.
 /// Encumbering a `to_holder` output on a commitment transaction or 2nd-stage HTLC transactions.
