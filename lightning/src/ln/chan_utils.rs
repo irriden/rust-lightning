@@ -786,6 +786,23 @@ pub fn get_to_countersignatory_with_anchors_redeemscript(payment_point: &PublicK
 		.into_script()
 }
 
+/// Taproot version
+#[inline]
+pub fn trt_get_to_countersignatory_with_anchors_redeemscript(payment_point: &PublicKey) -> bitcoin::taproot::TaprootSpendInfo {
+	let s = Builder::new()
+		.push_slice(payment_point.serialize())
+		.push_opcode(opcodes::all::OP_CHECKSIG)
+		.push_int(1)
+		.push_opcode(opcodes::all::OP_CSV)
+		.push_opcode(opcodes::all::OP_DROP)
+		.into_script();
+	taproot::TaprootBuilder::new()
+		.add_leaf(0u8, s)
+		.unwrap()
+		.finalize(&Secp256k1::new(), bitcoin::key::XOnlyPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap())
+		.unwrap()
+}
+
 /// Gets the witnessScript for an anchor output from the funding public key.
 /// The witness in the spending input must be:
 /// <BIP 143 funding_signature>
