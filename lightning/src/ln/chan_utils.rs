@@ -15,12 +15,11 @@ use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::transaction::{TxIn,TxOut,OutPoint,Transaction};
 use bitcoin::sighash;
 use bitcoin::sighash::EcdsaSighashType;
-use bitcoin::address::Payload;
 
 use bitcoin::hashes::{Hash, HashEngine};
 use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::ripemd160::Hash as Ripemd160;
-use bitcoin::hash_types::{Txid, PubkeyHash, WPubkeyHash};
+use bitcoin::hash_types::{Txid, PubkeyHash};
 
 use crate::chain::chaininterface::fee_for_weight;
 use crate::chain::package::WEIGHT_REVOKED_OUTPUT;
@@ -34,7 +33,6 @@ use bitcoin::blockdata::locktime::absolute::LockTime;
 use bitcoin::secp256k1::{SecretKey, PublicKey, Scalar};
 use bitcoin::secp256k1::{Secp256k1, ecdsa::Signature, Message, KeyPair, schnorr};
 use bitcoin::{secp256k1, Sequence, Witness};
-use bitcoin::PublicKey as BitcoinPublicKey;
 use bitcoin::taproot;
 
 use crate::io;
@@ -518,12 +516,16 @@ pub fn get_taproot_revokeable_info(revocation_key: &RevocationKey, contest_delay
 
 /// Returns the script for the counterparty's output on a holder's commitment transaction based on
 /// the channel type.
-pub fn get_counterparty_payment_script(channel_type_features: &ChannelTypeFeatures, payment_key: &PublicKey) -> ScriptBuf {
+pub fn get_counterparty_payment_script(_channel_type_features: &ChannelTypeFeatures, payment_key: &PublicKey) -> ScriptBuf {
+	/*
 	if channel_type_features.supports_anchors_zero_fee_htlc_tx() {
 		get_to_countersignatory_with_anchors_redeemscript(payment_key).to_v0_p2wsh()
 	} else {
 		ScriptBuf::new_v0_p2wpkh(&WPubkeyHash::hash(&payment_key.serialize()))
 	}
+	*/
+	let info = trt_get_to_countersignatory_with_anchors_redeemscript(payment_key);
+	ScriptBuf::new_v1_p2tr_tweaked(info.output_key())
 }
 
 /// Information about an HTLC as it appears in a commitment transaction
@@ -790,7 +792,7 @@ pub fn get_to_countersignatory_with_anchors_redeemscript(payment_point: &PublicK
 #[inline]
 pub fn trt_get_to_countersignatory_with_anchors_redeemscript(payment_point: &PublicKey) -> bitcoin::taproot::TaprootSpendInfo {
 	let s = Builder::new()
-		.push_slice(payment_point.serialize())
+		.push_slice(payment_point.x_only_public_key().0.serialize())
 		.push_opcode(opcodes::all::OP_CHECKSIG)
 		.push_int(1)
 		.push_opcode(opcodes::all::OP_CSV)
@@ -1509,11 +1511,7 @@ impl CommitmentTransaction {
 		let mut txouts: Vec<(TxOut, Option<&mut HTLCOutputInCommitment>)> = Vec::new();
 
 		if to_countersignatory_value_sat > 0 {
-			let script = if channel_parameters.channel_type_features().supports_anchors_zero_fee_htlc_tx() {
-			    get_to_countersignatory_with_anchors_redeemscript(&countersignatory_pubkeys.payment_point).to_v0_p2wsh()
-			} else {
-			    Payload::p2wpkh(&BitcoinPublicKey::new(countersignatory_pubkeys.payment_point)).unwrap().script_pubkey()
-			};
+			let script = get_counterparty_payment_script(channel_parameters.channel_type_features(), &countersignatory_pubkeys.payment_point);
 			txouts.push((
 				TxOut {
 					script_pubkey: script.clone(),

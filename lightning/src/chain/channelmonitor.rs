@@ -4729,7 +4729,7 @@ impl<'a, 'b, ES: EntropySource, SP: SignerProvider> ReadableArgs<(&'a ES, &'b SP
 		{
 			let payment_point = onchain_tx_handler.channel_transaction_parameters.holder_pubkeys.payment_point;
 			counterparty_payment_script =
-				chan_utils::get_to_countersignatory_with_anchors_redeemscript(&payment_point).to_v0_p2wsh();
+				chan_utils::get_counterparty_payment_script(&onchain_tx_handler.channel_type_features(), &payment_point);
 		}
 
 		Ok((best_block.block_hash, ChannelMonitor::from_impl(ChannelMonitorImpl {
