@@ -632,11 +632,93 @@ pub(crate) fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommit
 	}
 }
 
+#[inline]
+pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey, htlc_tx_redeemscript: bool) -> (ScriptBuf, taproot::TaprootSpendInfo) {
+	let payment_hash160 = Ripemd160::hash(&htlc.payment_hash.0[..]).to_byte_array();
+	if htlc.offered {
+		let htlc_timeout = Builder::new()
+			.push_slice(&broadcaster_htlc_key.to_public_key().x_only_public_key().0.serialize())
+			.push_opcode(opcodes::all::OP_CHECKSIGVERIFY)
+			.push_slice(&countersignatory_htlc_key.to_public_key().x_only_public_key().0.serialize())
+			.push_opcode(opcodes::all::OP_CHECKSIG)
+			.into_script();
+		let htlc_success = Builder::new()
+			.push_opcode(opcodes::all::OP_SIZE)
+			.push_int(32)
+			.push_opcode(opcodes::all::OP_EQUALVERIFY)
+			.push_opcode(opcodes::all::OP_HASH160)
+			.push_slice(&payment_hash160)
+			.push_opcode(opcodes::all::OP_EQUALVERIFY)
+			.push_slice(&countersignatory_htlc_key.to_public_key().x_only_public_key().0.serialize())
+			.push_opcode(opcodes::all::OP_CHECKSIG)
+			.push_int(1)
+			.push_opcode(opcodes::all::OP_CSV)
+			.push_opcode(opcodes::all::OP_DROP)
+			.into_script();
+		let info = taproot::TaprootBuilder::new()
+			.add_leaf(1u8, htlc_timeout.clone()).unwrap()
+			.add_leaf(1u8, htlc_success.clone()).unwrap()
+			.finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0)
+			.unwrap();
+		if htlc_tx_redeemscript {
+			(htlc_timeout, info)
+		} else {
+			(htlc_success, info)
+		}
+	} else {
+		let htlc_timeout = Builder::new()
+			.push_slice(&countersignatory_htlc_key.to_public_key().x_only_public_key().0.serialize())
+			.push_opcode(opcodes::all::OP_CHECKSIG)
+			.push_int(1)
+			.push_opcode(opcodes::all::OP_CSV)
+			.push_opcode(opcodes::all::OP_DROP)
+			.push_int(htlc.cltv_expiry as i64)
+			.push_opcode(opcodes::all::OP_CLTV)
+			.push_opcode(opcodes::all::OP_DROP)
+			.into_script();
+		let htlc_success = Builder::new()
+			.push_opcode(opcodes::all::OP_SIZE)
+			.push_int(32)
+			.push_opcode(opcodes::all::OP_EQUALVERIFY)
+			.push_opcode(opcodes::all::OP_HASH160)
+			.push_slice(&payment_hash160)
+			.push_opcode(opcodes::all::OP_EQUALVERIFY)
+			.push_slice(&broadcaster_htlc_key.to_public_key().x_only_public_key().0.serialize())
+			.push_opcode(opcodes::all::OP_CHECKSIGVERIFY)
+			.push_slice(&countersignatory_htlc_key.to_public_key().x_only_public_key().0.serialize())
+			.push_opcode(opcodes::all::OP_CHECKSIG)
+			.into_script();
+		let info = taproot::TaprootBuilder::new()
+			.add_leaf(1u8, htlc_timeout.clone()).unwrap()
+			.add_leaf(1u8, htlc_success.clone()).unwrap()
+			.finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0)
+			.unwrap();
+		if htlc_tx_redeemscript {
+			(htlc_success, info)
+		} else {
+			(htlc_timeout, info)
+		}
+	}
+}
+
 /// Gets the witness redeemscript for an HTLC output in a commitment transaction. Note that htlc
 /// does not need to have its previous_output_index filled.
 #[inline]
 pub fn get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, keys: &TxCreationKeys) -> ScriptBuf {
 	get_htlc_redeemscript_with_explicit_keys(htlc, channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key)
+}
+
+/// Taproot version
+#[inline]
+pub fn trt_get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, keys: &TxCreationKeys, htlc_tx_redeemscript: bool) -> (ScriptBuf, taproot::TaprootSpendInfo) {
+	trt_get_htlc_redeemscript_with_explicit_keys(htlc, channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, htlc_tx_redeemscript)
+}
+
+/// Taproot version
+#[inline]
+pub fn trt_get_htlc_scriptpubkey(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, keys: &TxCreationKeys) -> ScriptBuf {
+	let info = trt_get_htlc_redeemscript(htlc, channel_type_features, keys, false).1;
+	ScriptBuf::new_v1_p2tr_tweaked(info.output_key())
 }
 
 /// Gets the redeemscript for a funding output from the two funding public keys.
@@ -1562,9 +1644,9 @@ impl CommitmentTransaction {
 
 		let mut htlcs = Vec::with_capacity(htlcs_with_aux.len());
 		for (htlc, _) in htlcs_with_aux {
-			let script = chan_utils::get_htlc_redeemscript(&htlc, &channel_parameters.channel_type_features(), &keys);
+			let script_pubkey = chan_utils::trt_get_htlc_scriptpubkey(&htlc, &channel_parameters.channel_type_features(), &keys);
 			let txout = TxOut {
-				script_pubkey: script.to_v0_p2wsh(),
+				script_pubkey,
 				value: htlc.amount_msat / 1000,
 			};
 			txouts.push((txout, Some(htlc)));
@@ -1746,7 +1828,8 @@ impl<'a> TrustedCommitmentTransaction<'a> {
 			assert!(this_htlc.transaction_output_index.is_some());
 			let htlc_tx = build_htlc_transaction(&txid, inner.feerate_per_kw, channel_parameters.contest_delay(), &this_htlc, &self.channel_type_features, &keys.broadcaster_delayed_payment_key, &keys.revocation_key);
 
-			let htlc_redeemscript = get_htlc_redeemscript_with_explicit_keys(&this_htlc, &self.channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key);
+			let (htlc_redeemscript, info) = trt_get_htlc_redeemscript_with_explicit_keys(&this_htlc, &self.channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, true);
+			let ctrl = info.control_block(&(htlc_redeemscript.clone(), taproot::LeafVersion::TapScript)).unwrap();
 
 			let sighash = hash_to_message!(&sighash::SighashCache::new(&htlc_tx).segwit_signature_hash(0, &htlc_redeemscript, this_htlc.amount_msat / 1000, EcdsaSighashType::All).unwrap()[..]);
 			ret.push(sign_with_aux_rand(secp_ctx, &sighash, &holder_htlc_key, entropy_source));
