@@ -633,7 +633,7 @@ pub(crate) fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommit
 }
 
 #[inline]
-pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey, htlc_tx_redeemscript: bool) -> (ScriptBuf, taproot::TaprootSpendInfo) {
+pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey, htlc_tx_redeemscript: bool) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
 	let payment_hash160 = Ripemd160::hash(&htlc.payment_hash.0[..]).to_byte_array();
 	if htlc.offered {
 		let htlc_timeout = Builder::new()
@@ -661,9 +661,9 @@ pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCo
 			.finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0)
 			.unwrap();
 		if htlc_tx_redeemscript {
-			(htlc_timeout, info)
+			((htlc_timeout, taproot::LeafVersion::TapScript), info)
 		} else {
-			(htlc_success, info)
+			((htlc_success, taproot::LeafVersion::TapScript), info)
 		}
 	} else {
 		let htlc_timeout = Builder::new()
@@ -694,9 +694,9 @@ pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCo
 			.finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0)
 			.unwrap();
 		if htlc_tx_redeemscript {
-			(htlc_success, info)
+			((htlc_success, taproot::LeafVersion::TapScript), info)
 		} else {
-			(htlc_timeout, info)
+			((htlc_timeout, taproot::LeafVersion::TapScript), info)
 		}
 	}
 }
@@ -710,7 +710,7 @@ pub fn get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_feature
 
 /// Taproot version
 #[inline]
-pub fn trt_get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, keys: &TxCreationKeys, htlc_tx_redeemscript: bool) -> (ScriptBuf, taproot::TaprootSpendInfo) {
+pub fn trt_get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, keys: &TxCreationKeys, htlc_tx_redeemscript: bool) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
 	trt_get_htlc_redeemscript_with_explicit_keys(htlc, channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, htlc_tx_redeemscript)
 }
 
@@ -1817,7 +1817,7 @@ impl<'a> TrustedCommitmentTransaction<'a> {
 	pub fn get_htlc_sigs<T: secp256k1::Signing, ES: Deref>(
 		&self, htlc_base_key: &SecretKey, channel_parameters: &DirectedChannelTransactionParameters,
 		entropy_source: &ES, secp_ctx: &Secp256k1<T>,
-	) -> Result<Vec<Signature>, ()> where ES::Target: EntropySource {
+	) -> Result<Vec<schnorr::Signature>, ()> where ES::Target: EntropySource {
 		let inner = self.inner;
 		let keys = &inner.keys;
 		let txid = inner.built.txid;
@@ -1828,11 +1828,15 @@ impl<'a> TrustedCommitmentTransaction<'a> {
 			assert!(this_htlc.transaction_output_index.is_some());
 			let htlc_tx = build_htlc_transaction(&txid, inner.feerate_per_kw, channel_parameters.contest_delay(), &this_htlc, &self.channel_type_features, &keys.broadcaster_delayed_payment_key, &keys.revocation_key);
 
-			let (htlc_redeemscript, info) = trt_get_htlc_redeemscript_with_explicit_keys(&this_htlc, &self.channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, true);
-			let ctrl = info.control_block(&(htlc_redeemscript.clone(), taproot::LeafVersion::TapScript)).unwrap();
-
-			let sighash = hash_to_message!(&sighash::SighashCache::new(&htlc_tx).segwit_signature_hash(0, &htlc_redeemscript, this_htlc.amount_msat / 1000, EcdsaSighashType::All).unwrap()[..]);
-			ret.push(sign_with_aux_rand(secp_ctx, &sighash, &holder_htlc_key, entropy_source));
+			let ((htlc_redeemscript, _), info) = trt_get_htlc_redeemscript_with_explicit_keys(&this_htlc, &self.channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, true);
+			let prevout = &[TxOut {
+				value: this_htlc.amount_msat / 1000,
+				script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
+			}];
+            let prevout = sighash::Prevouts::All(prevout);
+			let leaf_hash = htlc_redeemscript.tapscript_leaf_hash();
+			let sighash = hash_to_message!(&sighash::SighashCache::new(&htlc_tx).taproot_script_spend_signature_hash(0, &prevout, leaf_hash, sighash::TapSighashType::Default).unwrap()[..]);
+            ret.push(sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &holder_htlc_key)));
 		}
 		Ok(ret)
 	}
