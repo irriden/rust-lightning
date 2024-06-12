@@ -4462,7 +4462,7 @@ impl<SP: Deref> Channel<SP> where
 					script_pubkey: chan_utils::trt_get_htlc_scriptpubkey(&htlc, &self.context.channel_type, &keys),
 					value: htlc.amount_msat / 1000,
 				};
-				let prevout = sighash::Prevouts::One(idx, &prevout);
+				let prevout = sighash::Prevouts::One(0, &prevout);
 				let leaf_hash = htlc_redeemscript.0.0.tapscript_leaf_hash();
 				let htlc_sighash = hash_to_message!(&sighash::SighashCache::new(&htlc_tx).taproot_script_spend_signature_hash(0, &prevout, leaf_hash, htlc_sighashtype).unwrap()[..]);
 				/*

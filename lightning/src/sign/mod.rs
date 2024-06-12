@@ -1460,7 +1460,6 @@ impl EcdsaChannelSigner for InMemorySigner {
 		_inbound_htlc_preimages: Vec<PaymentPreimage>,
 		_outbound_htlc_preimages: Vec<PaymentPreimage>, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<(schnorr::Signature, Vec<schnorr::Signature>), ()> {
-		/*
 		let trusted_tx = commitment_tx.trust();
 		let keys = trusted_tx.keys();
 
@@ -1493,18 +1492,20 @@ impl EcdsaChannelSigner for InMemorySigner {
 				&keys.broadcaster_delayed_payment_key,
 				&keys.revocation_key,
 			);
-			let htlc_redeemscript = chan_utils::get_htlc_redeemscript(&htlc, chan_type, &keys);
-			let htlc_sighashtype = if chan_type.supports_anchors_zero_fee_htlc_tx() {
-				EcdsaSighashType::SinglePlusAnyoneCanPay
-			} else {
-				EcdsaSighashType::All
+			let (htlc_redeemscript, info) = chan_utils::trt_get_htlc_redeemscript(&htlc, chan_type, &keys, !htlc.offered);
+			let htlc_sighashtype = sighash::TapSighashType::SinglePlusAnyoneCanPay;
+			let prevout = TxOut {
+				script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
+				value: htlc.amount_msat / 1000,
 			};
+			let prevout = sighash::Prevouts::One(0, &prevout);
+			//let prevout = sighash::Prevouts::One(htlc.transaction_output_index.expect("this is a dust output") as usize, &prevout);
 			let htlc_sighash = hash_to_message!(
 				&sighash::SighashCache::new(&htlc_tx)
-					.segwit_signature_hash(
+					.taproot_script_spend_signature_hash(
 						0,
-						&htlc_redeemscript,
-						htlc.amount_msat / 1000,
+						&prevout,
+						htlc_redeemscript.0.tapscript_leaf_hash(),
 						htlc_sighashtype
 					)
 					.unwrap()[..]
@@ -1514,12 +1515,10 @@ impl EcdsaChannelSigner for InMemorySigner {
 				&keys.per_commitment_point,
 				&self.htlc_base_key,
 			);
-			htlc_sigs.push(sign(secp_ctx, &htlc_sighash, &holder_htlc_key));
+			htlc_sigs.push(sign_schnorr(secp_ctx, &htlc_sighash, &KeyPair::from_secret_key(secp_ctx, &holder_htlc_key)));
 		}
 
 		Ok((commitment_sig, htlc_sigs))
-		*/
-		todo!();
 	}
 
 	fn sign_holder_commitment(
@@ -1645,32 +1644,35 @@ impl EcdsaChannelSigner for InMemorySigner {
 		&self, htlc_tx: &Transaction, input: usize, htlc_descriptor: &HTLCDescriptor,
 		secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		/*
-		let witness_script = htlc_descriptor.witness_script(secp_ctx);
-		let sighash = &sighash::SighashCache::new(&*htlc_tx)
-			.segwit_signature_hash(
+		let (witness_script, info) = htlc_descriptor.witness_script(secp_ctx);
+		let prevout = [TxOut {
+			script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
+			value: htlc_descriptor.htlc.amount_msat / 1000,
+		}];
+		// FIXME: again assumes that this htlc_tx only spends a single htlc output
+		let prevout = sighash::Prevouts::All(&prevout);
+		let leaf_hash = witness_script.0.tapscript_leaf_hash();
+		let sighash = &sighash::SighashCache::new(htlc_tx)
+			.taproot_script_spend_signature_hash(
 				input,
-				&witness_script,
-				htlc_descriptor.htlc.amount_msat / 1000,
-				EcdsaSighashType::All,
+				&prevout,
+				leaf_hash,
+				sighash::TapSighashType::Default,
 			)
 			.map_err(|_| ())?;
 		let our_htlc_private_key = chan_utils::derive_private_key(
-			&secp_ctx,
+			secp_ctx,
 			&htlc_descriptor.per_commitment_point,
 			&self.htlc_base_key,
 		);
 		let sighash = hash_to_message!(sighash.as_byte_array());
-		Ok(sign_with_aux_rand(&secp_ctx, &sighash, &our_htlc_private_key, &self))
-		*/
-		todo!();
+		Ok(sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &our_htlc_private_key)))
 	}
 
 	fn sign_counterparty_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, amount: u64, per_commitment_point: &PublicKey,
 		htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		/*
 		let htlc_key =
 			chan_utils::derive_private_key(&secp_ctx, &per_commitment_point, &self.htlc_base_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
@@ -1687,22 +1689,28 @@ impl EcdsaChannelSigner for InMemorySigner {
 		let htlc_basepoint = self.pubkeys().htlc_basepoint;
 		let htlcpubkey = HtlcKey::from_basepoint(&secp_ctx, &htlc_basepoint, &per_commitment_point);
 		let chan_type = self.channel_type_features().expect(MISSING_PARAMS_ERR);
-		let witness_script = chan_utils::get_htlc_redeemscript_with_explicit_keys(
+		let (witness_script, info) = chan_utils::trt_get_htlc_redeemscript_with_explicit_keys(
 			&htlc,
 			chan_type,
 			&counterparty_htlcpubkey,
 			&htlcpubkey,
 			&revocation_pubkey,
+			htlc.offered,
 		);
+		let prevout = [TxOut {
+			script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
+			value: amount,
+		}];
+		let leaf_hash = witness_script.0.tapscript_leaf_hash();
 		let mut sighash_parts = sighash::SighashCache::new(htlc_tx);
+		// FIXME: this assumes that this transaction spend only this single input, as opposed to
+		// possibly signing multiple
 		let sighash = hash_to_message!(
 			&sighash_parts
-				.segwit_signature_hash(input, &witness_script, amount, EcdsaSighashType::All)
+				.taproot_script_spend_signature_hash(input, &sighash::Prevouts::All(&prevout), leaf_hash, sighash::TapSighashType::Default)
 				.unwrap()[..]
 		);
-		Ok(sign_with_aux_rand(secp_ctx, &sighash, &htlc_key, &self))
-		*/
-		todo!();
+		Ok(sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &htlc_key)))
 	}
 
 	fn sign_closing_transaction(
