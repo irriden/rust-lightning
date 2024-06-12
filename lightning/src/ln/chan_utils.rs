@@ -633,7 +633,7 @@ pub(crate) fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommit
 }
 
 #[inline]
-pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey, htlc_tx_redeemscript: bool) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
+pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey, preimage_known: bool) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
 	let payment_hash160 = Ripemd160::hash(&htlc.payment_hash.0[..]).to_byte_array();
 	if htlc.offered {
 		let htlc_timeout = Builder::new()
@@ -660,10 +660,10 @@ pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCo
 			.add_leaf(1u8, htlc_success.clone()).unwrap()
 			.finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0)
 			.unwrap();
-		if htlc_tx_redeemscript {
-			((htlc_timeout, taproot::LeafVersion::TapScript), info)
-		} else {
+		if preimage_known {
 			((htlc_success, taproot::LeafVersion::TapScript), info)
+		} else {
+			((htlc_timeout, taproot::LeafVersion::TapScript), info)
 		}
 	} else {
 		let htlc_timeout = Builder::new()
@@ -693,7 +693,7 @@ pub(crate) fn trt_get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCo
 			.add_leaf(1u8, htlc_success.clone()).unwrap()
 			.finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0)
 			.unwrap();
-		if htlc_tx_redeemscript {
+		if preimage_known {
 			((htlc_success, taproot::LeafVersion::TapScript), info)
 		} else {
 			((htlc_timeout, taproot::LeafVersion::TapScript), info)
@@ -710,8 +710,8 @@ pub fn get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_feature
 
 /// Taproot version
 #[inline]
-pub fn trt_get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, keys: &TxCreationKeys, htlc_tx_redeemscript: bool) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
-	trt_get_htlc_redeemscript_with_explicit_keys(htlc, channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, htlc_tx_redeemscript)
+pub fn trt_get_htlc_redeemscript(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, keys: &TxCreationKeys, preimage_known: bool) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
+	trt_get_htlc_redeemscript_with_explicit_keys(htlc, channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, preimage_known)
 }
 
 /// Taproot version
@@ -804,27 +804,28 @@ pub(crate) fn build_htlc_output(
 
 /// Returns the witness required to satisfy and spend a HTLC input.
 pub fn build_htlc_input_witness(
-	local_sig: &Signature, remote_sig: &Signature, preimage: &Option<PaymentPreimage>,
-	redeem_script: &Script, channel_type_features: &ChannelTypeFeatures,
+	local_sig: &schnorr::Signature, remote_sig: &schnorr::Signature, preimage: &Option<PaymentPreimage>,
+	redeem_script: &Script, channel_type_features: &ChannelTypeFeatures, control_block: taproot::ControlBlock,
 ) -> Witness {
-	let remote_sighash_type = if channel_type_features.supports_anchors_zero_fee_htlc_tx() {
-		EcdsaSighashType::SinglePlusAnyoneCanPay
-	} else {
-		EcdsaSighashType::All
+	let remote_sighash_type = sighash::TapSighashType::SinglePlusAnyoneCanPay;
+
+	let local_sig = taproot::Signature {
+		sig: *local_sig,
+		hash_ty: sighash::TapSighashType::Default,
+	};
+	let remote_sig = taproot::Signature {
+		sig: *remote_sig,
+		hash_ty: remote_sighash_type,
 	};
 
 	let mut witness = Witness::new();
-	// First push the multisig dummy, note that due to BIP147 (NULLDUMMY) it must be a zero-length element.
-	witness.push(vec![]);
-	witness.push_bitcoin_signature(&remote_sig.serialize_der(), remote_sighash_type);
-	witness.push_bitcoin_signature(&local_sig.serialize_der(), EcdsaSighashType::All);
+	witness.push(remote_sig.to_vec());
+	witness.push(local_sig.to_vec());
 	if let Some(preimage) = preimage {
 		witness.push(preimage.0.to_vec());
-	} else {
-		// Due to BIP146 (MINIMALIF) this must be a zero-length element to relay.
-		witness.push(vec![]);
 	}
 	witness.push(redeem_script.to_bytes());
+	witness.push(control_block.serialize());
 	witness
 }
 
@@ -1113,7 +1114,7 @@ pub struct HolderCommitmentTransaction {
 	/// Our counterparty's signature for the transaction
 	pub counterparty_sig: schnorr::Signature,
 	/// All non-dust counterparty HTLC signatures, in the order they appear in the transaction
-	pub counterparty_htlc_sigs: Vec<Signature>,
+	pub counterparty_htlc_sigs: Vec<schnorr::Signature>,
 	// Which order the signatures should go in when constructing the final commitment tx witness.
 	// The user should be able to reconstruct this themselves, so we don't bother to expose it.
 	holder_sig_first: bool,
@@ -1186,7 +1187,7 @@ impl HolderCommitmentTransaction {
 
 	/// Create a new holder transaction with the given counterparty signatures.
 	/// The funding keys are used to figure out which signature should go first when building the transaction for broadcast.
-	pub fn new(commitment_tx: CommitmentTransaction, counterparty_sig: schnorr::Signature, counterparty_htlc_sigs: Vec<Signature>, holder_funding_key: &PublicKey, counterparty_funding_key: &PublicKey) -> Self {
+	pub fn new(commitment_tx: CommitmentTransaction, counterparty_sig: schnorr::Signature, counterparty_htlc_sigs: Vec<schnorr::Signature>, holder_funding_key: &PublicKey, counterparty_funding_key: &PublicKey) -> Self {
 		Self {
 			inner: commitment_tx,
 			counterparty_sig,
@@ -1828,7 +1829,7 @@ impl<'a> TrustedCommitmentTransaction<'a> {
 			assert!(this_htlc.transaction_output_index.is_some());
 			let htlc_tx = build_htlc_transaction(&txid, inner.feerate_per_kw, channel_parameters.contest_delay(), &this_htlc, &self.channel_type_features, &keys.broadcaster_delayed_payment_key, &keys.revocation_key);
 
-			let ((htlc_redeemscript, _), info) = trt_get_htlc_redeemscript_with_explicit_keys(&this_htlc, &self.channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, true);
+			let ((htlc_redeemscript, _), info) = trt_get_htlc_redeemscript_with_explicit_keys(&this_htlc, &self.channel_type_features, &keys.broadcaster_htlc_key, &keys.countersignatory_htlc_key, &keys.revocation_key, !this_htlc.offered);
 			let prevout = &[TxOut {
 				value: this_htlc.amount_msat / 1000,
 				script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
@@ -1864,16 +1865,18 @@ impl<'a> TrustedCommitmentTransaction<'a> {
 	/// Builds the witness required to spend the input for the HTLC with index `htlc_index` in a
 	/// second-level holder HTLC transaction.
 	pub(crate) fn build_htlc_input_witness(
-		&self, htlc_index: usize, counterparty_signature: &Signature, signature: &Signature,
+		&self, htlc_index: usize, counterparty_signature: &schnorr::Signature, signature: &schnorr::Signature,
 		preimage: &Option<PaymentPreimage>
 	) -> Witness {
 		let keys = &self.inner.keys;
-		let htlc_redeemscript = get_htlc_redeemscript_with_explicit_keys(
-			&self.inner.htlcs[htlc_index], &self.channel_type_features, &keys.broadcaster_htlc_key,
-			&keys.countersignatory_htlc_key, &keys.revocation_key
+		let htlc = &self.inner.htlcs[htlc_index];
+		let (htlc_redeemscript, info) = trt_get_htlc_redeemscript_with_explicit_keys(
+			htlc, &self.channel_type_features, &keys.broadcaster_htlc_key,
+			&keys.countersignatory_htlc_key, &keys.revocation_key, !htlc.offered,
 		);
+		let ctrl = info.control_block(&htlc_redeemscript).unwrap();
 		chan_utils::build_htlc_input_witness(
-			signature, counterparty_signature, preimage, &htlc_redeemscript, &self.channel_type_features,
+			signature, counterparty_signature, preimage, &htlc_redeemscript.0, &self.channel_type_features, ctrl
 		)
 	}
 

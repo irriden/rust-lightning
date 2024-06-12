@@ -40,6 +40,7 @@ use bitcoin::psbt::PartiallySignedTransaction;
 use bitcoin::secp256k1;
 use bitcoin::secp256k1::{PublicKey, Secp256k1};
 use bitcoin::secp256k1::ecdsa::Signature;
+use bitcoin::secp256k1::schnorr;
 
 pub(crate) const EMPTY_SCRIPT_SIG_WEIGHT: u64 = 1 /* empty script_sig */ * WITNESS_SCALE_FACTOR as u64;
 
@@ -761,8 +762,9 @@ where
 			let signer = signers.entry(htlc_descriptor.channel_derivation_parameters.keys_id)
 				.or_insert_with(|| htlc_descriptor.derive_channel_signer(&self.signer_provider));
 			let htlc_sig = signer.sign_holder_htlc_transaction(&htlc_tx, idx, htlc_descriptor, &self.secp)?;
-			let witness_script = htlc_descriptor.witness_script(&self.secp);
-			htlc_tx.input[idx].witness = htlc_descriptor.tx_input_witness(&htlc_sig, &witness_script);
+			let (witness_script, info) = htlc_descriptor.witness_script(&self.secp);
+			let ctrl = info.control_block(&witness_script).unwrap();
+			htlc_tx.input[idx].witness = htlc_descriptor.tx_input_witness(&htlc_sig, &witness_script.0, ctrl);
 		}
 
 		#[cfg(debug_assertions)] {

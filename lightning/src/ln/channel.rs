@@ -4456,13 +4456,22 @@ impl<SP: Deref> Channel<SP> where
 					self.context.get_counterparty_selected_contest_delay().unwrap(), &htlc, &self.context.channel_type,
 					&keys.broadcaster_delayed_payment_key, &keys.revocation_key);
 
-				let htlc_redeemscript = chan_utils::get_htlc_redeemscript(&htlc, &self.context.channel_type, &keys);
-				let htlc_sighashtype = if self.context.channel_type.supports_anchors_zero_fee_htlc_tx() { EcdsaSighashType::SinglePlusAnyoneCanPay } else { EcdsaSighashType::All };
-				let htlc_sighash = hash_to_message!(&sighash::SighashCache::new(&htlc_tx).segwit_signature_hash(0, &htlc_redeemscript, htlc.amount_msat / 1000, htlc_sighashtype).unwrap()[..]);
+				let htlc_redeemscript = chan_utils::trt_get_htlc_redeemscript(&htlc, &self.context.channel_type, &keys, !htlc.offered);
+				let htlc_sighashtype = sighash::TapSighashType::SinglePlusAnyoneCanPay;
+				let prevout = bitcoin::TxOut {
+					script_pubkey: chan_utils::trt_get_htlc_scriptpubkey(&htlc, &self.context.channel_type, &keys),
+					value: htlc.amount_msat / 1000,
+				};
+				let prevout = sighash::Prevouts::One(idx, &prevout);
+				let leaf_hash = htlc_redeemscript.0.0.tapscript_leaf_hash();
+				let htlc_sighash = hash_to_message!(&sighash::SighashCache::new(&htlc_tx).taproot_script_spend_signature_hash(0, &prevout, leaf_hash, htlc_sighashtype).unwrap()[..]);
+				/*
+				 * FIXME: we don't have a serialize function for schnorr sigs yet
 				log_trace!(logger, "Checking HTLC tx signature {} by key {} against tx {} (sighash {}) with redeemscript {} in channel {}.",
 					log_bytes!(msg.htlc_signatures[idx].serialize_compact()[..]), log_bytes!(keys.countersignatory_htlc_key.to_public_key().serialize()),
 					encode::serialize_hex(&htlc_tx), log_bytes!(htlc_sighash[..]), encode::serialize_hex(&htlc_redeemscript), &self.context.channel_id());
-				if let Err(_) = self.context.secp_ctx.verify_ecdsa(&htlc_sighash, &msg.htlc_signatures[idx], &keys.countersignatory_htlc_key.to_public_key()) {
+				*/
+				if let Err(_) = self.context.secp_ctx.verify_schnorr(&msg.htlc_signatures[idx], &htlc_sighash, &keys.countersignatory_htlc_key.to_public_key().x_only_public_key().0) {
 					return Err(ChannelError::Close("Invalid HTLC tx signature from peer".to_owned()));
 				}
 				if !separate_nondust_htlc_sources {
@@ -7205,13 +7214,17 @@ impl<SP: Deref> Channel<SP> where
 						&counterparty_commitment_txid, encode::serialize_hex(&self.context.get_funding_redeemscript()),
 						log_bytes!(*signature.as_ref()), &self.context.channel_id());
 
+					/*
+					 * FIXME: the serialize function on schnorr::Signature comes in a later
+					 * bitcoin-core release
 					for (ref htlc_sig, ref htlc) in htlc_signatures.iter().zip(htlcs) {
 						log_trace!(logger, "Signed remote HTLC tx {} with redeemscript {} with pubkey {} -> {} in channel {}",
 							encode::serialize_hex(&chan_utils::build_htlc_transaction(&counterparty_commitment_txid, commitment_stats.feerate_per_kw, self.context.get_holder_selected_contest_delay(), htlc, &self.context.channel_type, &counterparty_keys.broadcaster_delayed_payment_key, &counterparty_keys.revocation_key)),
 							encode::serialize_hex(&chan_utils::get_htlc_redeemscript(&htlc, &self.context.channel_type, &counterparty_keys)),
 							log_bytes!(counterparty_keys.broadcaster_htlc_key.to_public_key().serialize()),
-							log_bytes!(htlc_sig.serialize_compact()[..]), &self.context.channel_id());
+							log_bytes!(htlc_sig.serialize()), &self.context.channel_id());
 					}
+					*/
 				}
 
 				Ok((msgs::CommitmentSigned {

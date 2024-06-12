@@ -21,6 +21,7 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hash_types::{Txid, BlockHash};
 use bitcoin::secp256k1::{Secp256k1, ecdsa::Signature};
 use bitcoin::secp256k1;
+use bitcoin::secp256k1::schnorr;
 
 use crate::chain::chaininterface::compute_feerate_sat_per_1000_weight;
 use crate::sign::{ChannelDerivationParameters, HTLCDescriptor, ChannelSigner, EntropySource, SignerProvider, ecdsa::WriteableEcdsaChannelSigner};
@@ -178,7 +179,7 @@ pub(crate) struct ExternalHTLCClaim {
 	pub(crate) per_commitment_number: u64,
 	pub(crate) htlc: HTLCOutputInCommitment,
 	pub(crate) preimage: Option<PaymentPreimage>,
-	pub(crate) counterparty_sig: Signature,
+	pub(crate) counterparty_sig: schnorr::Signature,
 }
 
 // Represents the different types of claims for which events are yielded externally to satisfy said

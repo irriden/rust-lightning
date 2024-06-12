@@ -31,6 +31,7 @@ use bitcoin::hash_types::{Txid, BlockHash};
 use bitcoin::secp256k1::{Secp256k1, ecdsa::Signature};
 use bitcoin::secp256k1::{SecretKey, PublicKey};
 use bitcoin::secp256k1;
+use bitcoin::secp256k1::schnorr;
 use bitcoin::sighash::EcdsaSighashType;
 
 use crate::ln::channel::INITIAL_COMMITMENT_NUMBER;
@@ -285,7 +286,7 @@ struct HolderSignedTx {
 	b_htlc_key: HtlcKey,
 	delayed_payment_key: DelayedPaymentKey,
 	per_commitment_point: PublicKey,
-	htlc_outputs: Vec<(HTLCOutputInCommitment, Option<Signature>, Option<HTLCSource>)>,
+	htlc_outputs: Vec<(HTLCOutputInCommitment, Option<schnorr::Signature>, Option<HTLCSource>)>,
 	to_self_value_sat: u64,
 	feerate_per_kw: u32,
 }
@@ -531,7 +532,7 @@ pub(crate) enum ChannelMonitorUpdateStep {
 		/// Note that LDK after 0.0.115 supports this only containing dust HTLCs (implying the
 		/// `Signature` field is never filled in). At that point, non-dust HTLCs are implied by the
 		/// HTLC fields in `commitment_tx` and the sources passed via `nondust_htlc_sources`.
-		htlc_outputs: Vec<(HTLCOutputInCommitment, Option<Signature>, Option<HTLCSource>)>,
+		htlc_outputs: Vec<(HTLCOutputInCommitment, Option<schnorr::Signature>, Option<HTLCSource>)>,
 		claimed_htlcs: Vec<(SentHTLCId, PaymentPreimage)>,
 		nondust_htlc_sources: Vec<HTLCSource>,
 	},
@@ -2652,7 +2653,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 	/// is important that any clones of this channel monitor (including remote clones) by kept
 	/// up-to-date as our holder commitment transaction is updated.
 	/// Panics if set_on_holder_tx_csv has never been called.
-	fn provide_latest_holder_commitment_tx(&mut self, holder_commitment_tx: HolderCommitmentTransaction, mut htlc_outputs: Vec<(HTLCOutputInCommitment, Option<Signature>, Option<HTLCSource>)>, claimed_htlcs: &[(SentHTLCId, PaymentPreimage)], nondust_htlc_sources: Vec<HTLCSource>) -> Result<(), &'static str> {
+	fn provide_latest_holder_commitment_tx(&mut self, holder_commitment_tx: HolderCommitmentTransaction, mut htlc_outputs: Vec<(HTLCOutputInCommitment, Option<schnorr::Signature>, Option<HTLCSource>)>, claimed_htlcs: &[(SentHTLCId, PaymentPreimage)], nondust_htlc_sources: Vec<HTLCSource>) -> Result<(), &'static str> {
 		if htlc_outputs.iter().any(|(_, s, _)| s.is_some()) {
 			// If we have non-dust HTLCs in htlc_outputs, ensure they match the HTLCs in the
 			// `holder_commitment_tx`. In the future, we'll no longer provide the redundant data

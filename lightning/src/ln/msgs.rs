@@ -719,7 +719,7 @@ pub struct CommitmentSigned {
 	/// A signature on the commitment transaction
 	pub signature: schnorr::Signature,
 	/// Signatures on the HTLC transactions
-	pub htlc_signatures: Vec<Signature>,
+	pub htlc_signatures: Vec<schnorr::Signature>,
 	#[cfg(taproot)]
 	/// The partial Taproot signature on the commitment transaction
 	pub partial_signature_with_nonce: Option<PartialSignatureWithNonce>,

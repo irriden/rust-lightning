@@ -46,7 +46,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	fn sign_counterparty_commitment(
 		&self, commitment_tx: &CommitmentTransaction, inbound_htlc_preimages: Vec<PaymentPreimage>,
 		outbound_htlc_preimages: Vec<PaymentPreimage>, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<(schnorr::Signature, Vec<Signature>), ()>;
+	) -> Result<(schnorr::Signature, Vec<schnorr::Signature>), ()>;
 	/// Creates a signature for a holder's commitment transaction.
 	///
 	/// This will be called
@@ -149,7 +149,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	fn sign_holder_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, htlc_descriptor: &HTLCDescriptor,
 		secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()>;
+	) -> Result<schnorr::Signature, ()>;
 	/// Create a signature for a claiming transaction for a HTLC output on a counterparty's commitment
 	/// transaction, either offered or received.
 	///
@@ -177,7 +177,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	fn sign_counterparty_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, amount: u64, per_commitment_point: &PublicKey,
 		htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()>;
+	) -> Result<schnorr::Signature, ()>;
 	/// Create a signature for a (proposed) closing transaction.
 	///
 	/// Note that, due to rounding, there may be one "missing" satoshi, and either party may have

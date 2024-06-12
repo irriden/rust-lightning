@@ -610,27 +610,35 @@ impl PackageSolvingData {
 			},
 			PackageSolvingData::CounterpartyOfferedHTLCOutput(ref outp) => {
 				let chan_keys = TxCreationKeys::derive_new(&onchain_handler.secp_ctx, &outp.per_commitment_point, &outp.counterparty_delayed_payment_base_key, &outp.counterparty_htlc_base_key, &onchain_handler.signer.pubkeys().revocation_basepoint, &onchain_handler.signer.pubkeys().htlc_basepoint);
-				let witness_script = chan_utils::get_htlc_redeemscript_with_explicit_keys(&outp.htlc, &onchain_handler.channel_type_features(), &chan_keys.broadcaster_htlc_key, &chan_keys.countersignatory_htlc_key, &chan_keys.revocation_key);
+				assert!(outp.htlc.offered);
+				let (witness_script, info) = chan_utils::trt_get_htlc_redeemscript_with_explicit_keys(&outp.htlc, &onchain_handler.channel_type_features(), &chan_keys.broadcaster_htlc_key, &chan_keys.countersignatory_htlc_key, &chan_keys.revocation_key, true);
 
 				if let Ok(sig) = onchain_handler.signer.sign_counterparty_htlc_transaction(&bumped_tx, i, &outp.htlc.amount_msat / 1000, &outp.per_commitment_point, &outp.htlc, &onchain_handler.secp_ctx) {
-					let mut ser_sig = sig.serialize_der().to_vec();
-					ser_sig.push(EcdsaSighashType::All as u8);
-					bumped_tx.input[i].witness.push(ser_sig);
+					let sig = bitcoin::taproot::Signature {
+						sig,
+						hash_ty: bitcoin::sighash::TapSighashType::Default,
+					};
+					let ctrl = info.control_block(&witness_script).unwrap();
+					bumped_tx.input[i].witness.push(sig.to_vec());
 					bumped_tx.input[i].witness.push(outp.preimage.0.to_vec());
-					bumped_tx.input[i].witness.push(witness_script.clone().into_bytes());
+					bumped_tx.input[i].witness.push(witness_script.0.clone().into_bytes());
+					bumped_tx.input[i].witness.push(ctrl.serialize());
 				}
 			},
 			PackageSolvingData::CounterpartyReceivedHTLCOutput(ref outp) => {
 				let chan_keys = TxCreationKeys::derive_new(&onchain_handler.secp_ctx, &outp.per_commitment_point, &outp.counterparty_delayed_payment_base_key, &outp.counterparty_htlc_base_key, &onchain_handler.signer.pubkeys().revocation_basepoint, &onchain_handler.signer.pubkeys().htlc_basepoint);
-				let witness_script = chan_utils::get_htlc_redeemscript_with_explicit_keys(&outp.htlc, &onchain_handler.channel_type_features(), &chan_keys.broadcaster_htlc_key, &chan_keys.countersignatory_htlc_key, &chan_keys.revocation_key);
+				assert!(!outp.htlc.offered);
+				let (witness_script, info) = chan_utils::trt_get_htlc_redeemscript_with_explicit_keys(&outp.htlc, &onchain_handler.channel_type_features(), &chan_keys.broadcaster_htlc_key, &chan_keys.countersignatory_htlc_key, &chan_keys.revocation_key, false);
 
 				if let Ok(sig) = onchain_handler.signer.sign_counterparty_htlc_transaction(&bumped_tx, i, &outp.htlc.amount_msat / 1000, &outp.per_commitment_point, &outp.htlc, &onchain_handler.secp_ctx) {
-					let mut ser_sig = sig.serialize_der().to_vec();
-					ser_sig.push(EcdsaSighashType::All as u8);
-					bumped_tx.input[i].witness.push(ser_sig);
-					// Due to BIP146 (MINIMALIF) this must be a zero-length element to relay.
-					bumped_tx.input[i].witness.push(vec![]);
-					bumped_tx.input[i].witness.push(witness_script.clone().into_bytes());
+					let sig = bitcoin::taproot::Signature {
+						sig,
+						hash_ty: bitcoin::sighash::TapSighashType::Default,
+					};
+					let ctrl = info.control_block(&witness_script).unwrap();
+					bumped_tx.input[i].witness.push(sig.to_vec());
+					bumped_tx.input[i].witness.push(witness_script.0.clone().into_bytes());
+					bumped_tx.input[i].witness.push(ctrl.serialize());
 				}
 			},
 			_ => { panic!("API Error!"); }

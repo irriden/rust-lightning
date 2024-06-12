@@ -578,7 +578,7 @@ pub struct HTLCDescriptor {
 	/// taken.
 	pub preimage: Option<PaymentPreimage>,
 	/// The counterparty's signature required to spend the HTLC output.
-	pub counterparty_sig: Signature,
+	pub counterparty_sig: schnorr::Signature,
 }
 
 impl_writeable_tlv_based!(HTLCDescriptor, {
@@ -607,8 +607,10 @@ impl HTLCDescriptor {
 	pub fn previous_utxo<C: secp256k1::Signing + secp256k1::Verification>(
 		&self, secp: &Secp256k1<C>,
 	) -> TxOut {
+		let (_, info) = self.witness_script(secp);
+		let script_pubkey = ScriptBuf::new_v1_p2tr_tweaked(info.output_key());
 		TxOut {
-			script_pubkey: self.witness_script(secp).to_v0_p2wsh(),
+			script_pubkey,
 			value: self.htlc.amount_msat / 1000,
 		}
 	}
@@ -655,7 +657,7 @@ impl HTLCDescriptor {
 	/// Returns the witness script of the HTLC output in the commitment transaction.
 	pub fn witness_script<C: secp256k1::Signing + secp256k1::Verification>(
 		&self, secp: &Secp256k1<C>,
-	) -> ScriptBuf {
+	) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
 		let channel_params =
 			self.channel_derivation_parameters.transaction_parameters.as_holder_broadcastable();
 		let broadcaster_keys = channel_params.broadcaster_pubkeys();
@@ -675,24 +677,27 @@ impl HTLCDescriptor {
 			&counterparty_keys.revocation_basepoint,
 			&self.per_commitment_point,
 		);
-		chan_utils::get_htlc_redeemscript_with_explicit_keys(
+		let (script, info) = chan_utils::trt_get_htlc_redeemscript_with_explicit_keys(
 			&self.htlc,
 			channel_params.channel_type_features(),
 			&broadcaster_htlc_key,
 			&counterparty_htlc_key,
 			&counterparty_revocation_key,
-		)
+			self.preimage.is_some(),
+		);
+		(script, info)
 	}
 
 	/// Returns the fully signed witness required to spend the HTLC output in the commitment
 	/// transaction.
-	pub fn tx_input_witness(&self, signature: &Signature, witness_script: &Script) -> Witness {
+	pub fn tx_input_witness(&self, signature: &schnorr::Signature, witness_script: &Script, control_block: taproot::ControlBlock) -> Witness {
 		chan_utils::build_htlc_input_witness(
 			signature,
 			&self.counterparty_sig,
 			&self.preimage,
 			witness_script,
 			&self.channel_derivation_parameters.transaction_parameters.channel_type_features,
+			control_block,
 		)
 	}
 
@@ -1454,7 +1459,8 @@ impl EcdsaChannelSigner for InMemorySigner {
 		&self, commitment_tx: &CommitmentTransaction,
 		_inbound_htlc_preimages: Vec<PaymentPreimage>,
 		_outbound_htlc_preimages: Vec<PaymentPreimage>, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<(schnorr::Signature, Vec<Signature>), ()> {
+	) -> Result<(schnorr::Signature, Vec<schnorr::Signature>), ()> {
+		/*
 		let trusted_tx = commitment_tx.trust();
 		let keys = trusted_tx.keys();
 
@@ -1512,6 +1518,8 @@ impl EcdsaChannelSigner for InMemorySigner {
 		}
 
 		Ok((commitment_sig, htlc_sigs))
+		*/
+		todo!();
 	}
 
 	fn sign_holder_commitment(
@@ -1636,7 +1644,8 @@ impl EcdsaChannelSigner for InMemorySigner {
 	fn sign_holder_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, htlc_descriptor: &HTLCDescriptor,
 		secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
+		/*
 		let witness_script = htlc_descriptor.witness_script(secp_ctx);
 		let sighash = &sighash::SighashCache::new(&*htlc_tx)
 			.segwit_signature_hash(
@@ -1653,12 +1662,15 @@ impl EcdsaChannelSigner for InMemorySigner {
 		);
 		let sighash = hash_to_message!(sighash.as_byte_array());
 		Ok(sign_with_aux_rand(&secp_ctx, &sighash, &our_htlc_private_key, &self))
+		*/
+		todo!();
 	}
 
 	fn sign_counterparty_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, amount: u64, per_commitment_point: &PublicKey,
 		htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
+		/*
 		let htlc_key =
 			chan_utils::derive_private_key(&secp_ctx, &per_commitment_point, &self.htlc_base_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
@@ -1689,6 +1701,8 @@ impl EcdsaChannelSigner for InMemorySigner {
 				.unwrap()[..]
 		);
 		Ok(sign_with_aux_rand(secp_ctx, &sighash, &htlc_key, &self))
+		*/
+		todo!();
 	}
 
 	fn sign_closing_transaction(
