@@ -508,10 +508,24 @@ pub fn get_taproot_revokeable_info(revocation_key: &RevocationKey, contest_delay
 	              .push_opcode(opcodes::all::OP_CHECKSIG)
 	              .into_script();
 	let spend_info = taproot::TaprootBuilder::new()
-	              .add_leaf(1u8, to_delay_script.clone()).unwrap()
-	              .add_leaf(1u8, revoke_script.clone()).unwrap()
+	              .add_leaf(1u8, to_delay_script).unwrap()
+	              .add_leaf(1u8, revoke_script).unwrap()
 	              .finalize(&Secp256k1::new(), bitcoin::key::XOnlyPublicKey::from_slice(&SIMPLE_TAPROOT_NUMS).unwrap()).unwrap();
 	spend_info
+}
+
+/// Revokeable script on the htlc tx, taproot version
+pub fn trt_get_htlc_tx_output(revocation_key: &RevocationKey, contest_delay: u16, broadcaster_delayed_payment_key: &DelayedPaymentKey) -> (ScriptBuf, taproot::TaprootSpendInfo) {
+	let htlc_output_script = Builder::new()
+	              .push_slice(&broadcaster_delayed_payment_key.to_public_key().x_only_public_key().0.serialize())
+	              .push_opcode(opcodes::all::OP_CHECKSIG)
+	              .push_int(contest_delay as i64)
+	              .push_opcode(opcodes::all::OP_CSV)
+	              .push_opcode(opcodes::all::OP_DROP)
+				  .into_script();
+	(htlc_output_script.clone(), taproot::TaprootBuilder::new()
+	              .add_leaf(0u8, htlc_output_script).unwrap()
+	              .finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0).unwrap())
 }
 
 /// Returns the script for the counterparty's output on a holder's commitment transaction based on
@@ -788,16 +802,11 @@ pub(crate) fn build_htlc_output(
 	} else {
 		htlc_success_tx_weight(channel_type_features)
 	};
-	let output_value = if channel_type_features.supports_anchors_zero_fee_htlc_tx() && !channel_type_features.supports_anchors_nonzero_fee_htlc_tx() {
-		htlc.amount_msat / 1000
-	} else {
-		let total_fee = feerate_per_kw as u64 * weight / 1000;
-		htlc.amount_msat / 1000 - total_fee
-	};
+	let output_value = htlc.amount_msat / 1000;
 
-	let taproot_spend_info = get_taproot_revokeable_info(revocation_key, contest_delay, broadcaster_delayed_payment_key);
+	let (_script, info) = trt_get_htlc_tx_output(revocation_key, contest_delay, broadcaster_delayed_payment_key);
 	TxOut {
-		script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key()),
+		script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
 		value: output_value,
 	}
 }
