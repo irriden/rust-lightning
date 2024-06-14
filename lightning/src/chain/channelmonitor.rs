@@ -798,6 +798,7 @@ pub(crate) struct ChannelMonitorImpl<Signer: WriteableEcdsaChannelSigner> {
 	broadcasted_holder_revokable_script: Option<(ScriptBuf, PublicKey, RevocationKey)>,
 	counterparty_payment_script: ScriptBuf,
 	shutdown_script: Option<ScriptBuf>,
+	broadcasted_htlc_holder_revokable_script: Option<(ScriptBuf, PublicKey, RevocationKey)>,
 
 	channel_keys_id: [u8; 32],
 	holder_revocation_basepoint: RevocationBasepoint,
@@ -981,6 +982,15 @@ impl<Signer: WriteableEcdsaChannelSigner> Writeable for ChannelMonitorImpl<Signe
 			broadcasted_holder_revokable_script.0.write(writer)?;
 			broadcasted_holder_revokable_script.1.write(writer)?;
 			broadcasted_holder_revokable_script.2.write(writer)?;
+		} else {
+			writer.write_all(&[1; 1])?;
+		}
+
+		if let Some(ref broadcasted_htlc_holder_revokable_script) = self.broadcasted_htlc_holder_revokable_script {
+			writer.write_all(&[0; 1])?;
+			broadcasted_htlc_holder_revokable_script.0.write(writer)?;
+			broadcasted_htlc_holder_revokable_script.1.write(writer)?;
+			broadcasted_htlc_holder_revokable_script.2.write(writer)?;
 		} else {
 			writer.write_all(&[1; 1])?;
 		}
@@ -1284,6 +1294,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitor<Signer> {
 
 			destination_script: destination_script.into(),
 			broadcasted_holder_revokable_script: None,
+			broadcasted_htlc_holder_revokable_script: None,
 			counterparty_payment_script,
 			shutdown_script,
 
@@ -4397,6 +4408,20 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 					}));
 				}
 			}
+			if let Some(ref broadcasted_htlc_holder_revokable_script) = self.broadcasted_htlc_holder_revokable_script {
+				if broadcasted_htlc_holder_revokable_script.0 == outp.script_pubkey {
+					spendable_outputs.push(SpendableOutputDescriptor::DelayedPaymentOutput(DelayedPaymentOutputDescriptor {
+						outpoint: OutPoint { txid: tx.txid(), index: i as u16 },
+						per_commitment_point: broadcasted_htlc_holder_revokable_script.1,
+						to_self_delay: self.on_holder_tx_csv,
+						output: outp.clone(),
+						revocation_pubkey: broadcasted_htlc_holder_revokable_script.2,
+						channel_keys_id: self.channel_keys_id,
+						channel_value_satoshis: self.channel_value_satoshis,
+						channel_transaction_parameters: Some(self.onchain_tx_handler.channel_transaction_parameters.clone()),
+					}));
+				}
+			}
 			if self.counterparty_payment_script == outp.script_pubkey {
 				spendable_outputs.push(SpendableOutputDescriptor::StaticPaymentOutput(StaticPaymentOutputDescriptor {
 					outpoint: OutPoint { txid: tx.txid(), index: i as u16 },
@@ -4498,6 +4523,16 @@ impl<'a, 'b, ES: EntropySource, SP: SignerProvider> ReadableArgs<(&'a ES, &'b SP
 
 		let destination_script = Readable::read(reader)?;
 		let broadcasted_holder_revokable_script = match <u8 as Readable>::read(reader)? {
+			0 => {
+				let revokable_address = Readable::read(reader)?;
+				let per_commitment_point = Readable::read(reader)?;
+				let revokable_script = Readable::read(reader)?;
+				Some((revokable_address, per_commitment_point, revokable_script))
+			},
+			1 => { None },
+			_ => return Err(DecodeError::InvalidValue),
+		};
+		let broadcasted_htlc_holder_revokable_script = match <u8 as Readable>::read(reader)? {
 			0 => {
 				let revokable_address = Readable::read(reader)?;
 				let per_commitment_point = Readable::read(reader)?;
@@ -4739,6 +4774,7 @@ impl<'a, 'b, ES: EntropySource, SP: SignerProvider> ReadableArgs<(&'a ES, &'b SP
 
 			destination_script,
 			broadcasted_holder_revokable_script,
+			broadcasted_htlc_holder_revokable_script,
 			counterparty_payment_script,
 			shutdown_script,
 

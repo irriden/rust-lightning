@@ -515,7 +515,7 @@ pub fn get_taproot_revokeable_info(revocation_key: &RevocationKey, contest_delay
 }
 
 /// Revokeable script on the htlc tx, taproot version
-pub fn trt_get_htlc_tx_output(revocation_key: &RevocationKey, contest_delay: u16, broadcaster_delayed_payment_key: &DelayedPaymentKey) -> (ScriptBuf, taproot::TaprootSpendInfo) {
+pub fn trt_get_htlc_tx_output(revocation_key: &RevocationKey, contest_delay: u16, broadcaster_delayed_payment_key: &DelayedPaymentKey) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
 	let htlc_output_script = Builder::new()
 	              .push_slice(&broadcaster_delayed_payment_key.to_public_key().x_only_public_key().0.serialize())
 	              .push_opcode(opcodes::all::OP_CHECKSIG)
@@ -523,7 +523,7 @@ pub fn trt_get_htlc_tx_output(revocation_key: &RevocationKey, contest_delay: u16
 	              .push_opcode(opcodes::all::OP_CSV)
 	              .push_opcode(opcodes::all::OP_DROP)
 				  .into_script();
-	(htlc_output_script.clone(), taproot::TaprootBuilder::new()
+	((htlc_output_script.clone(), taproot::LeafVersion::TapScript), taproot::TaprootBuilder::new()
 	              .add_leaf(0u8, htlc_output_script).unwrap()
 	              .finalize(&Secp256k1::new(), revocation_key.to_public_key().x_only_public_key().0).unwrap())
 }

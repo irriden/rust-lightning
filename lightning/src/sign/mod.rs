@@ -1362,36 +1362,69 @@ impl InMemorySigner {
 			descriptor.to_self_delay,
 			&delayed_payment_pubkey,
 		);
-		let witness_script = taproot_spend_info.as_script_map().iter().nth(1).unwrap().0;
-		// FIXME: assumes this only spends a single output, to_local
-		assert_eq!(spend_tx.input.len(), 1);
-		let prevouts = [&descriptor.output];
-		let prevouts = sighash::Prevouts::All(&prevouts);
-		let leaf_hash = taproot::TapLeafHash::from_script(&witness_script.0, witness_script.1);
-		let sighash = hash_to_message!(
-				&sighash::SighashCache::new(spend_tx)
-					.taproot_script_spend_signature_hash(
-						input_idx,
-						&prevouts,
-						leaf_hash,
-						sighash::TapSighashType::Default)
-				.unwrap()[..]
+
+		let (htlc_redeemscript, htlc_info) = chan_utils::trt_get_htlc_tx_output(
+			&descriptor.revocation_pubkey,
+			descriptor.to_self_delay,
+			&delayed_payment_pubkey,
 		);
-		let local_delayedsig = taproot::Signature {
-			sig: sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &delayed_payment_key)),
-			hash_ty: sighash::TapSighashType::Default,
-		};
-		let payment_script = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
+		let commit_tx_payment_script = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
+		let htlc_tx_payment_script = ScriptBuf::new_v1_p2tr_tweaked(htlc_info.output_key());
 
-		if descriptor.output.script_pubkey != payment_script {
-			return Err(());
+		if descriptor.output.script_pubkey == commit_tx_payment_script {
+			let witness_script = taproot_spend_info.as_script_map().iter().nth(1).unwrap().0;
+			// FIXME: assumes this only spends a single output, to_local
+			assert_eq!(spend_tx.input.len(), 1);
+			let prevouts = [&descriptor.output];
+			let prevouts = sighash::Prevouts::All(&prevouts);
+			let leaf_hash = taproot::TapLeafHash::from_script(&witness_script.0, witness_script.1);
+			let sighash = hash_to_message!(
+					&sighash::SighashCache::new(spend_tx)
+						.taproot_script_spend_signature_hash(
+							input_idx,
+							&prevouts,
+							leaf_hash,
+							sighash::TapSighashType::Default)
+					.unwrap()[..]
+			);
+			let local_delayedsig = taproot::Signature {
+				sig: sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &delayed_payment_key)),
+				hash_ty: sighash::TapSighashType::Default,
+			};
+
+			Ok(Witness::from_slice(&[
+				&local_delayedsig.to_vec()[..],
+				witness_script.0.as_bytes(),
+				&taproot_spend_info.control_block(&witness_script).unwrap().serialize()[..],
+			]))
+		} else if descriptor.output.script_pubkey == htlc_tx_payment_script {
+			// FIXME: assumes this only spends a single output, to_local
+			assert_eq!(spend_tx.input.len(), 1);
+			let prevouts = [&descriptor.output];
+			let prevouts = sighash::Prevouts::All(&prevouts);
+			let leaf_hash = htlc_redeemscript.0.tapscript_leaf_hash();
+			let sighash = hash_to_message!(
+					&sighash::SighashCache::new(spend_tx)
+						.taproot_script_spend_signature_hash(
+							input_idx,
+							&prevouts,
+							leaf_hash,
+							sighash::TapSighashType::Default)
+					.unwrap()[..]
+			);
+			let local_delayedsig = taproot::Signature {
+				sig: sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &delayed_payment_key)),
+				hash_ty: sighash::TapSighashType::Default,
+			};
+
+			Ok(Witness::from_slice(&[
+				&local_delayedsig.to_vec()[..],
+				htlc_redeemscript.0.as_bytes(),
+				&taproot_spend_info.control_block(&htlc_redeemscript).unwrap().serialize()[..],
+			]))
+		} else {
+			Err(())
 		}
-
-		Ok(Witness::from_slice(&[
-			&local_delayedsig.to_vec()[..],
-			witness_script.0.as_bytes(),
-			&taproot_spend_info.control_block(&witness_script).unwrap().serialize()[..],
-		]))
 	}
 }
 
