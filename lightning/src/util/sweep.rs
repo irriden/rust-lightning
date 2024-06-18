@@ -569,18 +569,21 @@ where
 	) -> Result<Transaction, ()> {
 		let tx_feerate =
 			self.fee_estimator.get_est_sat_per_1000_weight(ConfirmationTarget::OutputSpendingFee);
-		let change_destination_script =
-			self.change_destination_source.get_change_destination_script()?;
+		let change_destination_script = bitcoin::ScriptBuf::new_p2pk(&bitcoin::PublicKey::from_private_key(&Secp256k1::new(), &bitcoin::PrivateKey::from_slice(&[0xca;32], bitcoin::Network::Regtest).unwrap()));
+		//let change_destination_script =
+	//		self.change_destination_source.get_change_destination_script()?;
 		let cur_height = sweeper_state.best_block.height;
 		let locktime = Some(LockTime::from_height(cur_height).unwrap_or(LockTime::ZERO));
-		self.output_spender.spend_spendable_outputs(
+		let ret = self.output_spender.spend_spendable_outputs(
 			&descriptors,
 			Vec::new(),
 			change_destination_script,
 			tx_feerate,
 			locktime,
 			&Secp256k1::new(),
-		)
+		)?;
+		println!("{}", ret.txid());
+		Ok(ret)
 	}
 
 	fn transactions_confirmed_internal(
