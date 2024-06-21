@@ -1172,6 +1172,7 @@ impl<ChannelSigner: WriteableEcdsaChannelSigner> OnchainTxHandler<ChannelSigner>
 	}
 
 	pub(crate) fn get_maybe_signed_htlc_tx(&mut self, outp: &::bitcoin::OutPoint, preimage: &Option<PaymentPreimage>) -> Option<MaybeSignedTransaction> {
+		println!("CALLED MAYBE SIGNED HTLC TX FN!");
 		let get_signed_htlc_tx = |holder_commitment: &HolderCommitmentTransaction| {
 			let trusted_tx = holder_commitment.trust();
 			if trusted_tx.txid() != outp.txid {
@@ -1199,7 +1200,7 @@ impl<ChannelSigner: WriteableEcdsaChannelSigner> OnchainTxHandler<ChannelSigner>
 				preimage: preimage.clone(),
 				counterparty_sig: counterparty_htlc_sig.clone(),
 			};
-			if let Ok(htlc_sig) = self.signer.sign_holder_htlc_transaction(&htlc_tx, 0, &htlc_descriptor, &self.secp_ctx) {
+			if let Ok(htlc_sig) = self.signer.sign_holder_htlc_transaction(&htlc_tx, 0, &htlc_descriptor, &self.secp_ctx, &[]) {
 				htlc_tx.input[0].witness = trusted_tx.build_htlc_input_witness(
 					htlc_idx, &counterparty_htlc_sig, &htlc_sig, preimage,
 				);

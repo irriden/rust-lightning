@@ -148,7 +148,7 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 	/// [`ChannelMonitor::signer_unblocked`]: crate::chain::channelmonitor::ChannelMonitor::signer_unblocked
 	fn sign_holder_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, htlc_descriptor: &HTLCDescriptor,
-		secp_ctx: &Secp256k1<secp256k1::All>,
+		secp_ctx: &Secp256k1<secp256k1::All>, prevouts: &[bitcoin::TxOut],
 	) -> Result<schnorr::Signature, ()>;
 	/// Create a signature for a claiming transaction for a HTLC output on a counterparty's commitment
 	/// transaction, either offered or received.

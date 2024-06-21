@@ -1664,15 +1664,10 @@ impl EcdsaChannelSigner for InMemorySigner {
 
 	fn sign_holder_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, htlc_descriptor: &HTLCDescriptor,
-		secp_ctx: &Secp256k1<secp256k1::All>,
+		secp_ctx: &Secp256k1<secp256k1::All>, prevouts: &[TxOut],
 	) -> Result<schnorr::Signature, ()> {
 		let (witness_script, info) = htlc_descriptor.witness_script(secp_ctx);
-		let prevout = [TxOut {
-			script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
-			value: htlc_descriptor.htlc.amount_msat / 1000,
-		}];
-		// FIXME: again assumes that this htlc_tx only spends a single htlc output
-		let prevout = sighash::Prevouts::All(&prevout);
+		let prevout = sighash::Prevouts::All(&prevouts);
 		let leaf_hash = witness_script.0.tapscript_leaf_hash();
 		let sighash = &sighash::SighashCache::new(htlc_tx)
 			.taproot_script_spend_signature_hash(

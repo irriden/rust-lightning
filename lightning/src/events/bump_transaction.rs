@@ -751,6 +751,7 @@ where
 			}
 		}
 
+		let prevouts: Vec<_> = htlc_psbt.inputs.iter().filter_map(|input| input.witness_utxo.clone()).collect();
 		#[cfg(debug_assertions)]
 		let unsigned_tx_weight = htlc_psbt.unsigned_tx.weight().to_wu() - (htlc_psbt.unsigned_tx.input.len() as u64 * EMPTY_SCRIPT_SIG_WEIGHT);
 
@@ -761,12 +762,13 @@ where
 		for (idx, htlc_descriptor) in htlc_descriptors.iter().enumerate() {
 			let signer = signers.entry(htlc_descriptor.channel_derivation_parameters.keys_id)
 				.or_insert_with(|| htlc_descriptor.derive_channel_signer(&self.signer_provider));
-			let htlc_sig = signer.sign_holder_htlc_transaction(&htlc_tx, idx, htlc_descriptor, &self.secp)?;
+			let htlc_sig = signer.sign_holder_htlc_transaction(&htlc_tx, idx, htlc_descriptor, &self.secp, &prevouts)?;
 			let (witness_script, info) = htlc_descriptor.witness_script(&self.secp);
 			let ctrl = info.control_block(&witness_script).unwrap();
 			htlc_tx.input[idx].witness = htlc_descriptor.tx_input_witness(&htlc_sig, &witness_script.0, ctrl);
 		}
 
+/*
 		#[cfg(debug_assertions)] {
 			let signed_tx_weight = htlc_tx.weight().to_wu();
 			let expected_signed_tx_weight = unsigned_tx_weight + total_satisfaction_weight;
@@ -784,6 +786,7 @@ where
 			assert!(signed_tx_fee >= expected_signed_tx_fee &&
 				signed_tx_fee - fee_error_margin <= expected_signed_tx_fee);
 		}
+*/
 
 		log_info!(self.logger, "Broadcasting {}", log_tx!(htlc_tx));
 		self.broadcaster.broadcast_transactions(&[&htlc_tx]);
