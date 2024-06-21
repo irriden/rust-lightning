@@ -1321,9 +1321,10 @@ impl InMemorySigner {
 
 	/// Same as sign_dynamic_p2wsh_input, but for taproot
 	pub fn sign_dynamic_p2tr_input<C: Signing>(
-		&self, spend_tx: &Transaction, input_idx: usize,
+		&self, psbt: &PartiallySignedTransaction, input_idx: usize,
 		descriptor: &DelayedPaymentOutputDescriptor, secp_ctx: &Secp256k1<C>,
 	) -> Result<Witness, ()> {
+		let spend_tx = &psbt.unsigned_tx;
 		// TODO: We really should be taking the SigHashCache as a parameter here instead of
 		// spend_tx, but ideally the SigHashCache would expose the transaction's inputs read-only
 		// so that we can check them. This requires upstream rust-bitcoin changes (as well as
@@ -1349,25 +1350,24 @@ impl InMemorySigner {
 		);
 		let delayed_payment_pubkey =
 			DelayedPaymentKey::from_secret_key(&secp_ctx, &delayed_payment_key);
+
 		let taproot_spend_info = chan_utils::get_taproot_revokeable_info(
 			&descriptor.revocation_pubkey,
 			descriptor.to_self_delay,
 			&delayed_payment_pubkey,
 		);
+		let commit_tx_payment_script = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 
 		let (htlc_redeemscript, htlc_info) = chan_utils::trt_get_htlc_tx_output(
 			&descriptor.revocation_pubkey,
 			descriptor.to_self_delay,
 			&delayed_payment_pubkey,
 		);
-		let commit_tx_payment_script = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 		let htlc_tx_payment_script = ScriptBuf::new_v1_p2tr_tweaked(htlc_info.output_key());
 
 		if descriptor.output.script_pubkey == commit_tx_payment_script {
 			let witness_script = taproot_spend_info.as_script_map().iter().nth(1).unwrap().0;
-			// FIXME: assumes this only spends a single output, to_local
-			assert_eq!(spend_tx.input.len(), 1);
-			let prevouts = [&descriptor.output];
+			let prevouts: Vec<_> = psbt.inputs.iter().map(|input| { input.witness_utxo.as_ref().unwrap() }).collect();
 			let prevouts = sighash::Prevouts::All(&prevouts);
 			let leaf_hash = taproot::TapLeafHash::from_script(&witness_script.0, witness_script.1);
 			let sighash = hash_to_message!(
@@ -1390,9 +1390,7 @@ impl InMemorySigner {
 				&taproot_spend_info.control_block(&witness_script).unwrap().serialize()[..],
 			]))
 		} else if descriptor.output.script_pubkey == htlc_tx_payment_script {
-			// FIXME: assumes this only spends a single output, to_local
-			assert_eq!(spend_tx.input.len(), 1);
-			let prevouts = [&descriptor.output];
+			let prevouts: Vec<_> = psbt.inputs.iter().map(|input| { input.witness_utxo.as_ref().unwrap() }).collect();
 			let prevouts = sighash::Prevouts::All(&prevouts);
 			let leaf_hash = htlc_redeemscript.0.tapscript_leaf_hash();
 			let sighash = hash_to_message!(
@@ -1412,7 +1410,7 @@ impl InMemorySigner {
 			Ok(Witness::from_slice(&[
 				&local_delayedsig.to_vec()[..],
 				htlc_redeemscript.0.as_bytes(),
-				&taproot_spend_info.control_block(&htlc_redeemscript).unwrap().serialize()[..],
+				&htlc_info.control_block(&htlc_redeemscript).unwrap().serialize()[..],
 			]))
 		} else {
 			Err(())
@@ -2156,7 +2154,7 @@ impl KeysManager {
 						));
 					}
 					let witness = keys_cache.as_ref().unwrap().0.sign_dynamic_p2tr_input(
-						&psbt.unsigned_tx,
+						&psbt,
 						input_idx,
 						&descriptor,
 						&secp_ctx,

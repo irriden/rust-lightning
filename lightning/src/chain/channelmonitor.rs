@@ -2822,7 +2822,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 				// Assume that the broadcasted commitment transaction confirmed in the current best
 				// block. Even if not, its a reasonable metric for the bump criteria on the HTLC
 				// transactions.
-				let (claim_reqs, _) = self.get_broadcasted_holder_claims(&holder_commitment_tx, self.best_block.height);
+				let (claim_reqs, _, _) = self.get_broadcasted_holder_claims(&holder_commitment_tx, self.best_block.height);
 				self.onchain_tx_handler.update_claims_view_from_requests(claim_reqs, self.best_block.height, self.best_block.height, broadcaster, fee_estimator, logger);
 			}
 		}
@@ -2859,7 +2859,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 			// Because we're broadcasting a commitment transaction, we should construct the package
 			// assuming it gets confirmed in the next block. Sadly, we have code which considers
 			// "not yet confirmed" things as discardable, so we cannot do that here.
-			let (mut new_outpoints, _) = self.get_broadcasted_holder_claims(
+			let (mut new_outpoints, _, _) = self.get_broadcasted_holder_claims(
 				&self.current_holder_commitment_tx, self.best_block.height
 			);
 			let unsigned_commitment_tx = self.onchain_tx_handler.get_unsigned_holder_commitment_tx();
@@ -3494,12 +3494,15 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 	// Returns (1) `PackageTemplate`s that can be given to the OnchainTxHandler, so that the handler can
 	// broadcast transactions claiming holder HTLC commitment outputs and (2) a holder revokable
 	// script so we can detect whether a holder transaction has been seen on-chain.
-	fn get_broadcasted_holder_claims(&self, holder_tx: &HolderSignedTx, conf_height: u32) -> (Vec<PackageTemplate>, Option<(ScriptBuf, PublicKey, RevocationKey)>) {
+	fn get_broadcasted_holder_claims(&self, holder_tx: &HolderSignedTx, conf_height: u32) -> (Vec<PackageTemplate>, Option<(ScriptBuf, PublicKey, RevocationKey)>, Option<(ScriptBuf, PublicKey, RevocationKey)>) {
 		let mut claim_requests = Vec::with_capacity(holder_tx.htlc_outputs.len());
 
 		let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&holder_tx.revocation_key, self.on_holder_tx_csv, &holder_tx.delayed_payment_key);
 		let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 		let broadcasted_holder_revokable_script = Some((revokeable_p2tr, holder_tx.per_commitment_point.clone(), holder_tx.revocation_key.clone()));
+		let (_, taproot_spend_info) = chan_utils::trt_get_htlc_tx_output(&holder_tx.revocation_key, self.on_holder_tx_csv, &holder_tx.delayed_payment_key);
+		let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
+		let broadcasted_holder_htlc_tx_output = Some((revokeable_p2tr, holder_tx.per_commitment_point.clone(), holder_tx.revocation_key.clone()));
 
 		for &(ref htlc, _, _) in holder_tx.htlc_outputs.iter() {
 			if let Some(transaction_output_index) = htlc.transaction_output_index {
@@ -3529,7 +3532,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 			}
 		}
 
-		(claim_requests, broadcasted_holder_revokable_script)
+		(claim_requests, broadcasted_holder_revokable_script, broadcasted_holder_htlc_tx_output)
 	}
 
 	// Returns holder HTLC outputs to watch and react to in case of spending.
@@ -3556,6 +3559,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 			($updates: expr, $to_watch: expr) => {
 				claim_requests = $updates.0;
 				self.broadcasted_holder_revokable_script = $updates.1;
+				self.broadcasted_htlc_holder_revokable_script = $updates.2;
 				watch_outputs.append(&mut $to_watch);
 			}
 		}
