@@ -4212,6 +4212,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 
 			macro_rules! log_claim {
 				($tx_info: expr, $holder_tx: expr, $htlc: expr, $source_avail: expr) => {
+                /*
 					let outbound_htlc = $holder_tx == $htlc.offered;
 					// HTLCs must either be claimed by a matching script type or through the
 					// revocation path:
@@ -4237,6 +4238,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 							if outbound_htlc { "outbound" } else { "inbound" }, &$htlc.payment_hash,
 							if revocation_sig_claim { "revocation sig" } else if accepted_preimage_claim || offered_preimage_claim { "preimage" } else { "timeout" });
 					}
+                */
 				}
 			}
 

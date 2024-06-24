@@ -582,7 +582,6 @@ where
 			locktime,
 			&Secp256k1::new(),
 		)?;
-		println!("{}", ret.txid());
 		Ok(ret)
 	}
 

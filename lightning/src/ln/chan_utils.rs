@@ -865,6 +865,7 @@ pub fn build_htlc_input_witness(
 	}
 	witness.push(redeem_script.to_bytes());
 	witness.push(control_block.serialize());
+	//std::process::exit(0);
 	witness
 }
 

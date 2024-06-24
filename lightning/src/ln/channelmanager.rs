@@ -6539,6 +6539,7 @@ where
 							}
 						}
 					}
+					//std::process::exit(0);
 					return Ok(());
 				}
 			}
@@ -9842,6 +9843,7 @@ where
 	}
 
 	fn handle_update_fulfill_htlc(&self, counterparty_node_id: &PublicKey, msg: &msgs::UpdateFulfillHTLC) {
+        //std::process::exit(0);
 		let _persistence_guard = PersistenceNotifierGuard::notify_on_drop(self);
 		let _ = handle_error!(self, self.internal_update_fulfill_htlc(counterparty_node_id, msg), *counterparty_node_id);
 	}
