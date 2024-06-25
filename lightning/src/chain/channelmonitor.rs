@@ -3666,11 +3666,14 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 		let commitment_tx = self.onchain_tx_handler.get_fully_signed_copy_holder_tx(&self.funding_redeemscript);
 		let txid = commitment_tx.txid();
 		let mut holder_transactions = vec![commitment_tx];
+        /*
+        // we want to grab the htlc transactions as well, for the demo
 		// When anchor outputs are present, the HTLC transactions are only final once the commitment
 		// transaction confirms due to the CSV 1 encumberance.
 		if self.onchain_tx_handler.channel_type_features().supports_anchors_zero_fee_htlc_tx() {
 			return holder_transactions;
 		}
+        */
 		for htlc in self.current_holder_commitment_tx.htlc_outputs.iter() {
 			if let Some(vout) = htlc.0.transaction_output_index {
 				let preimage = if !htlc.0.offered {
