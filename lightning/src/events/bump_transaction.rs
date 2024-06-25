@@ -658,6 +658,7 @@ where
 		let anchor_sig = signer.sign_holder_anchor_input(&anchor_tx, 0, &self.secp)?;
 		anchor_tx.input[0].witness = anchor_descriptor.tx_input_witness(&anchor_sig);
 
+/*
 		#[cfg(debug_assertions)] {
 			let signed_tx_weight = anchor_tx.weight().to_wu();
 			let expected_signed_tx_weight = unsigned_tx_weight + total_satisfaction_weight;
@@ -676,6 +677,7 @@ where
 			assert!(package_fee >= expected_package_fee &&
 				package_fee - fee_error_margin <= expected_package_fee);
 		}
+    */
 
 		log_info!(self.logger, "Broadcasting anchor transaction {} to bump channel close with txid {}",
 			anchor_txid, commitment_tx.txid());

@@ -33,6 +33,7 @@ use bitcoin::secp256k1::{SecretKey, PublicKey};
 use bitcoin::secp256k1;
 use bitcoin::secp256k1::schnorr;
 use bitcoin::sighash::EcdsaSighashType;
+use bitcoin::taproot;
 
 use crate::ln::channel::INITIAL_COMMITMENT_NUMBER;
 use crate::ln::types::{PaymentHash, PaymentPreimage, ChannelId};
@@ -1437,9 +1438,17 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitor<Signer> {
 		F::Target: FeeEstimator,
 		L::Target: Logger,
 	{
+		use crate::bitcoin::consensus::Encodable;
+		use hex::display::DisplayHex;
+
 		let mut inner = self.inner.lock().unwrap();
-		let logger = WithChannelMonitor::from_impl(logger, &*inner);
-		inner.update_monitor(updates, broadcaster, fee_estimator, &logger)
+		let logger_impl = WithChannelMonitor::from_impl(logger, &*inner);
+		let ret = inner.update_monitor(updates, broadcaster, fee_estimator, &logger_impl);
+
+		drop(inner);
+		let txs = self.unsafe_get_latest_holder_commitment_txn(logger);
+		txs.iter().for_each(|tx| { let mut vec = Vec::new(); tx.consensus_encode(&mut vec).unwrap(); println!("{}", vec.as_hex());});
+		ret
 	}
 
 	/// Gets the update_id from the latest ChannelMonitorUpdate which was applied to this
@@ -3209,18 +3218,17 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 			&self.holder_revocation_basepoint, &their_per_commitment_point);
 		let delayed_key = DelayedPaymentKey::from_basepoint(&self.onchain_tx_handler.secp_ctx,
 			&self.counterparty_commitment_params.counterparty_delayed_payment_base_key, &their_per_commitment_point);
-		let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&revocation_pubkey,
-			self.counterparty_commitment_params.on_counterparty_tx_csv, &delayed_key);
-		// FIX: this nth 0 here is brittle. we are lucky that the scripts yield stable ordering in
-		// this one case
-		// The revoke script will always come first, because OP_DROP == 0x75, and OP_CHECKSIG ==
-		// 0xac, and both of these opcodes are prefixed by the same local delayed pubkey
-		let revoke_script = taproot_spend_info.as_script_map().iter().nth(0).unwrap().0;
-		let ctrl = taproot_spend_info.control_block(revoke_script).unwrap();
+		let (revoke_script, taproot_spend_info) = chan_utils::get_taproot_revokeable_info(&revocation_pubkey,
+			self.counterparty_commitment_params.on_counterparty_tx_csv, &delayed_key, true);
+		let ctrl = taproot_spend_info.control_block(&revoke_script).unwrap();
 
 		let sig = self.onchain_tx_handler.signer.sign_justice_revoked_output(
 			&justice_tx, input_idx, value, &per_commitment_key, &self.onchain_tx_handler.secp_ctx)?;
-		justice_tx.input[input_idx].witness.push_bitcoin_signature(&sig.serialize_der(), EcdsaSighashType::All);
+		let sig = taproot::Signature {
+			sig,
+			hash_ty: bitcoin::sighash::TapSighashType::Default,
+		};
+		justice_tx.input[input_idx].witness.push(sig.to_vec());
 		justice_tx.input[input_idx].witness.push(revoke_script.0.as_bytes());
 		justice_tx.input[input_idx].witness.push(ctrl.serialize());
 		Ok(justice_tx)
@@ -3280,7 +3288,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 			let revocation_pubkey = RevocationKey::from_basepoint(&self.onchain_tx_handler.secp_ctx,  &self.holder_revocation_basepoint, &per_commitment_point,);
 			let delayed_key = DelayedPaymentKey::from_basepoint(&self.onchain_tx_handler.secp_ctx, &self.counterparty_commitment_params.counterparty_delayed_payment_base_key, &PublicKey::from_secret_key(&self.onchain_tx_handler.secp_ctx, &per_commitment_key));
 
-			let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&revocation_pubkey, self.counterparty_commitment_params.on_counterparty_tx_csv, &delayed_key);
+			let (_, taproot_spend_info) = chan_utils::get_taproot_revokeable_info(&revocation_pubkey, self.counterparty_commitment_params.on_counterparty_tx_csv, &delayed_key, true);
 			let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 
 			// First, process non-htlc outputs (to_holder & to_counterparty)
@@ -3399,9 +3407,9 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 
 			let delayed_key = DelayedPaymentKey::from_basepoint(&self.onchain_tx_handler.secp_ctx, &self.counterparty_commitment_params.counterparty_delayed_payment_base_key, &per_commitment_point);
 
-			let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&revocation_pubkey,
+			let (_, taproot_spend_info) = chan_utils::get_taproot_revokeable_info(&revocation_pubkey,
 				self.counterparty_commitment_params.on_counterparty_tx_csv,
-				&delayed_key);
+				&delayed_key, true);
 			let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 			for (idx, outp) in transaction.output.iter().enumerate() {
 				if outp.script_pubkey == revokeable_p2tr {
@@ -3497,7 +3505,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 	fn get_broadcasted_holder_claims(&self, holder_tx: &HolderSignedTx, conf_height: u32) -> (Vec<PackageTemplate>, Option<(ScriptBuf, PublicKey, RevocationKey)>, Option<(ScriptBuf, PublicKey, RevocationKey)>) {
 		let mut claim_requests = Vec::with_capacity(holder_tx.htlc_outputs.len());
 
-		let taproot_spend_info = chan_utils::get_taproot_revokeable_info(&holder_tx.revocation_key, self.on_holder_tx_csv, &holder_tx.delayed_payment_key);
+		let (_, taproot_spend_info) = chan_utils::get_taproot_revokeable_info(&holder_tx.revocation_key, self.on_holder_tx_csv, &holder_tx.delayed_payment_key, false);
 		let revokeable_p2tr = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 		let broadcasted_holder_revokable_script = Some((revokeable_p2tr, holder_tx.per_commitment_point.clone(), holder_tx.revocation_key.clone()));
 		let (_, taproot_spend_info) = chan_utils::trt_get_htlc_tx_output(&holder_tx.revocation_key, self.on_holder_tx_csv, &holder_tx.delayed_payment_key);

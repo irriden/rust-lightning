@@ -1217,7 +1217,7 @@ impl InMemorySigner {
 		let witness_script = taproot_spend_info.as_script_map().iter().nth(0).unwrap().0;
 		let prevouts = [&descriptor.output];
 		let prevouts = sighash::Prevouts::All(&prevouts);
-		let leaf_hash = taproot::TapLeafHash::from_script(&witness_script.0, witness_script.1);
+		let leaf_hash = witness_script.0.tapscript_leaf_hash();
 
 		let sighash = hash_to_message!(
 			&sighash::SighashCache::new(spend_tx)
@@ -1351,10 +1351,11 @@ impl InMemorySigner {
 		let delayed_payment_pubkey =
 			DelayedPaymentKey::from_secret_key(&secp_ctx, &delayed_payment_key);
 
-		let taproot_spend_info = chan_utils::get_taproot_revokeable_info(
+		let (to_self_script, taproot_spend_info) = chan_utils::get_taproot_revokeable_info(
 			&descriptor.revocation_pubkey,
 			descriptor.to_self_delay,
 			&delayed_payment_pubkey,
+			false,
 		);
 		let commit_tx_payment_script = ScriptBuf::new_v1_p2tr_tweaked(taproot_spend_info.output_key());
 
@@ -1366,10 +1367,9 @@ impl InMemorySigner {
 		let htlc_tx_payment_script = ScriptBuf::new_v1_p2tr_tweaked(htlc_info.output_key());
 
 		if descriptor.output.script_pubkey == commit_tx_payment_script {
-			let witness_script = taproot_spend_info.as_script_map().iter().nth(1).unwrap().0;
 			let prevouts: Vec<_> = psbt.inputs.iter().map(|input| { input.witness_utxo.as_ref().unwrap() }).collect();
 			let prevouts = sighash::Prevouts::All(&prevouts);
-			let leaf_hash = taproot::TapLeafHash::from_script(&witness_script.0, witness_script.1);
+			let leaf_hash = to_self_script.0.tapscript_leaf_hash();
 			let sighash = hash_to_message!(
 					&sighash::SighashCache::new(spend_tx)
 						.taproot_script_spend_signature_hash(
@@ -1386,8 +1386,8 @@ impl InMemorySigner {
 
 			Ok(Witness::from_slice(&[
 				&local_delayedsig.to_vec()[..],
-				witness_script.0.as_bytes(),
-				&taproot_spend_info.control_block(&witness_script).unwrap().serialize()[..],
+				to_self_script.0.as_bytes(),
+				&taproot_spend_info.control_block(&to_self_script).unwrap().serialize()[..],
 			]))
 		} else if descriptor.output.script_pubkey == htlc_tx_payment_script {
 			let prevouts: Vec<_> = psbt.inputs.iter().map(|input| { input.witness_utxo.as_ref().unwrap() }).collect();
@@ -1561,7 +1561,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 	#[cfg(any(test, feature = "unsafe_revoked_tx_signing"))]
 	fn unsafe_sign_holder_commitment(
 		&self, commitment_tx: &HolderCommitmentTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
 		let funding_pubkey = PublicKey::from_secret_key(secp_ctx, &self.funding_key);
 		let counterparty_keys = self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR);
 		let funding_redeemscript =
@@ -1579,7 +1579,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 	fn sign_justice_revoked_output(
 		&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey,
 		secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
 		let revocation_key = chan_utils::derive_private_revocation_key(
 			&secp_ctx,
 			&per_commitment_key,
@@ -1591,7 +1591,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 			&self.pubkeys().revocation_basepoint,
 			&per_commitment_point,
 		);
-		let witness_script = {
+		let (witness_script, info) = {
 			let counterparty_keys = self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR);
 			let holder_selected_contest_delay =
 				self.holder_selected_contest_delay().expect(MISSING_PARAMS_ERR);
@@ -1600,19 +1600,23 @@ impl EcdsaChannelSigner for InMemorySigner {
 				&counterparty_keys.delayed_payment_basepoint,
 				&per_commitment_point,
 			);
-			chan_utils::get_revokeable_redeemscript(
+			chan_utils::get_taproot_revokeable_info(
 				&revocation_pubkey,
 				holder_selected_contest_delay,
 				&counterparty_delayedpubkey,
+				true,
 			)
 		};
+		let leaf_hash = witness_script.0.tapscript_leaf_hash();
+		let prevout = [TxOut {
+			value: amount,
+			script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
+		}];
+		let prevouts = sighash::Prevouts::All(&prevout);
 		let mut sighash_parts = sighash::SighashCache::new(justice_tx);
-		let sighash = hash_to_message!(
-			&sighash_parts
-				.segwit_signature_hash(input, &witness_script, amount, EcdsaSighashType::All)
-				.unwrap()[..]
-		);
-		return Ok(sign_with_aux_rand(secp_ctx, &sighash, &revocation_key, &self));
+		let sighash = sighash_parts.taproot_script_spend_signature_hash(input, &prevouts, leaf_hash, sighash::TapSighashType::Default).unwrap();
+		let sighash = hash_to_message!(sighash.as_byte_array());
+		return Ok(sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &revocation_key)));
 	}
 
 	fn sign_justice_revoked_htlc(
