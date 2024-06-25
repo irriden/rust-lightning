@@ -23,6 +23,7 @@ use bitcoin::psbt::PartiallySignedTransaction;
 use bitcoin::sighash;
 use bitcoin::sighash::EcdsaSighashType;
 use bitcoin::taproot;
+use bitcoin::key::TapTweak;
 
 use bitcoin::bech32::u5;
 use bitcoin::hash_types::WPubkeyHash;
@@ -1622,19 +1623,20 @@ impl EcdsaChannelSigner for InMemorySigner {
 	fn sign_justice_revoked_htlc(
 		&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey,
 		htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
 		let revocation_key = chan_utils::derive_private_revocation_key(
 			&secp_ctx,
 			&per_commitment_key,
 			&self.revocation_base_key,
 		);
+		let kp = KeyPair::from_secret_key(secp_ctx, &revocation_key);
 		let per_commitment_point = PublicKey::from_secret_key(secp_ctx, &per_commitment_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
 			&secp_ctx,
 			&self.pubkeys().revocation_basepoint,
 			&per_commitment_point,
 		);
-		let witness_script = {
+		let (_, info) = {
 			let counterparty_keys = self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR);
 			let counterparty_htlcpubkey = HtlcKey::from_basepoint(
 				&secp_ctx,
@@ -1647,21 +1649,28 @@ impl EcdsaChannelSigner for InMemorySigner {
 				&per_commitment_point,
 			);
 			let chan_type = self.channel_type_features().expect(MISSING_PARAMS_ERR);
-			chan_utils::get_htlc_redeemscript_with_explicit_keys(
+			chan_utils::trt_get_htlc_redeemscript_with_explicit_keys(
 				&htlc,
 				chan_type,
 				&counterparty_htlcpubkey,
 				&holder_htlcpubkey,
 				&revocation_pubkey,
+				true,
 			)
 		};
+
+		// TODO: assert that this txout is the same as what is found in the htlc output
+		let prevout = [TxOut {
+			value: amount,
+			script_pubkey: ScriptBuf::new_v1_p2tr_tweaked(info.output_key()),
+		}];
+		let prevouts = sighash::Prevouts::All(&prevout);
+		assert!(info.merkle_root().is_some());
+		let tweaked = kp.tap_tweak(secp_ctx, info.merkle_root());
 		let mut sighash_parts = sighash::SighashCache::new(justice_tx);
-		let sighash = hash_to_message!(
-			&sighash_parts
-				.segwit_signature_hash(input, &witness_script, amount, EcdsaSighashType::All)
-				.unwrap()[..]
-		);
-		return Ok(sign_with_aux_rand(secp_ctx, &sighash, &revocation_key, &self));
+		let sighash = sighash_parts.taproot_key_spend_signature_hash(input, &prevouts, sighash::TapSighashType::Default).unwrap();
+		let sighash = hash_to_message!(sighash.as_byte_array());
+		return Ok(sign_schnorr(secp_ctx, &sighash, &tweaked.to_inner()));
 	}
 
 	fn sign_holder_htlc_transaction(

@@ -1175,6 +1175,8 @@ impl<ChannelSigner: WriteableEcdsaChannelSigner> OnchainTxHandler<ChannelSigner>
 		println!("CALLED MAYBE SIGNED HTLC TX FN!");
 		let get_signed_htlc_tx = |holder_commitment: &HolderCommitmentTransaction| {
 			let trusted_tx = holder_commitment.trust();
+			let keys = trusted_tx.keys();
+			let features = self.channel_type_features();
 			if trusted_tx.txid() != outp.txid {
 				return None;
 			}
@@ -1200,7 +1202,12 @@ impl<ChannelSigner: WriteableEcdsaChannelSigner> OnchainTxHandler<ChannelSigner>
 				preimage: preimage.clone(),
 				counterparty_sig: counterparty_htlc_sig.clone(),
 			};
-			if let Ok(htlc_sig) = self.signer.sign_holder_htlc_transaction(&htlc_tx, 0, &htlc_descriptor, &self.secp_ctx, &[]) {
+			let script_pubkey = chan_utils::trt_get_htlc_scriptpubkey(&htlc, &features, keys);
+			let prevout = [bitcoin::TxOut {
+				value: htlc.amount_msat / 1000,
+				script_pubkey,
+			}];
+			if let Ok(htlc_sig) = self.signer.sign_holder_htlc_transaction(&htlc_tx, 0, &htlc_descriptor, &self.secp_ctx, &prevout) {
 				htlc_tx.input[0].witness = trusted_tx.build_htlc_input_witness(
 					htlc_idx, &counterparty_htlc_sig, &htlc_sig, preimage,
 				);
