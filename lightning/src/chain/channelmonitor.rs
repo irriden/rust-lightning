@@ -3478,7 +3478,8 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 		// and claim those which spend the commitment transaction, have a witness of 5 elements, and
 		// have a corresponding output at the same index within the transaction.
 		for (idx, input) in tx.input.iter().enumerate() {
-			if input.previous_output.txid == *commitment_txid && input.witness.len() == 5 && tx.output.get(idx).is_some() {
+			if input.previous_output.txid == *commitment_txid && (input.witness.len() == 5 || input.witness.len() == 4 && input.witness[1].len() == 64)
+				&& tx.output.get(idx).is_some() {
 				log_error!(logger, "Got broadcast of revoked counterparty HTLC transaction, spending {}:{}", htlc_txid, idx);
 				let revk_outp = RevokedOutput::build(
 					per_commitment_point, self.counterparty_commitment_params.counterparty_delayed_payment_base_key,
@@ -3487,7 +3488,7 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitorImpl<Signer> {
 					false
 				);
 				let justice_package = PackageTemplate::build_package(
-					htlc_txid, idx as u32, PackageSolvingData::RevokedOutput(revk_outp),
+					htlc_txid, idx as u32, PackageSolvingData::RevokedSecondTxOutput(revk_outp),
 					height + self.counterparty_commitment_params.on_counterparty_tx_csv as u32, height
 				);
 				claimable_outpoints.push(justice_package);

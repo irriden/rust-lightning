@@ -130,6 +130,11 @@ pub trait EcdsaChannelSigner: ChannelSigner {
 		&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey,
 		htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()>;
+    /// This claims the output on a revoked second-level htlc transaction
+	fn sign_justice_revoked_second_tx(
+		&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey,
+		secp_ctx: &Secp256k1<secp256k1::All>,
+	) -> Result<schnorr::Signature, ()>;
 	/// Computes the signature for a commitment transaction's HTLC output used as an input within
 	/// `htlc_tx`, which spends the commitment transaction at index `input`. The signature returned
 	/// must be be computed using [`EcdsaSighashType::All`].

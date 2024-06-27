@@ -493,6 +493,7 @@ impl Readable for HolderFundingOutput {
 pub(crate) enum PackageSolvingData {
 	RevokedOutput(RevokedOutput),
 	RevokedHTLCOutput(RevokedHTLCOutput),
+	RevokedSecondTxOutput(RevokedOutput),
 	CounterpartyOfferedHTLCOutput(CounterpartyOfferedHTLCOutput),
 	CounterpartyReceivedHTLCOutput(CounterpartyReceivedHTLCOutput),
 	HolderHTLCOutput(HolderHTLCOutput),
@@ -504,6 +505,7 @@ impl PackageSolvingData {
 		let amt = match self {
 			PackageSolvingData::RevokedOutput(ref outp) => outp.amount,
 			PackageSolvingData::RevokedHTLCOutput(ref outp) => outp.amount,
+			PackageSolvingData::RevokedSecondTxOutput(ref outp) => outp.amount,
 			PackageSolvingData::CounterpartyOfferedHTLCOutput(ref outp) => outp.htlc.amount_msat / 1000,
 			PackageSolvingData::CounterpartyReceivedHTLCOutput(ref outp) => outp.htlc.amount_msat / 1000,
 			PackageSolvingData::HolderHTLCOutput(ref outp) => {
@@ -521,6 +523,7 @@ impl PackageSolvingData {
 		match self {
 			PackageSolvingData::RevokedOutput(ref outp) => outp.weight as usize,
 			PackageSolvingData::RevokedHTLCOutput(ref outp) => outp.weight as usize,
+			PackageSolvingData::RevokedSecondTxOutput(ref outp) => outp.weight as usize,
 			PackageSolvingData::CounterpartyOfferedHTLCOutput(ref outp) => weight_offered_htlc(&outp.channel_type_features) as usize,
 			PackageSolvingData::CounterpartyReceivedHTLCOutput(ref outp) => weight_received_htlc(&outp.channel_type_features) as usize,
 			PackageSolvingData::HolderHTLCOutput(ref outp) => {
@@ -542,6 +545,7 @@ impl PackageSolvingData {
 				match input {
 					PackageSolvingData::RevokedHTLCOutput(..) => { true },
 					PackageSolvingData::RevokedOutput(..) => { true },
+					PackageSolvingData::RevokedSecondTxOutput(..) => { true },
 					_ => { false }
 				}
 			},
@@ -549,6 +553,15 @@ impl PackageSolvingData {
 				match input {
 					PackageSolvingData::RevokedOutput(..) => { true },
 					PackageSolvingData::RevokedHTLCOutput(..) => { true },
+					PackageSolvingData::RevokedSecondTxOutput(..) => { true },
+					_ => { false }
+				}
+			},
+			PackageSolvingData::RevokedSecondTxOutput(..) => {
+				match input {
+					PackageSolvingData::RevokedHTLCOutput(..) => { true },
+					PackageSolvingData::RevokedOutput(..) => { true },
+					PackageSolvingData::RevokedSecondTxOutput(..) => { true },
 					_ => { false }
 				}
 			},
@@ -559,6 +572,7 @@ impl PackageSolvingData {
 		let sequence = match self {
 			PackageSolvingData::RevokedOutput(_) => Sequence::ENABLE_RBF_NO_LOCKTIME,
 			PackageSolvingData::RevokedHTLCOutput(_) => Sequence::ENABLE_RBF_NO_LOCKTIME,
+			PackageSolvingData::RevokedSecondTxOutput(_) => Sequence::ENABLE_RBF_NO_LOCKTIME,
 			PackageSolvingData::CounterpartyOfferedHTLCOutput(outp) => if outp.channel_type_features.supports_anchors_zero_fee_htlc_tx() {
 				Sequence::from_consensus(1)
 			} else {
@@ -608,6 +622,16 @@ impl PackageSolvingData {
 					bumped_tx.input[i].witness.push(sig.to_vec());
 				} else { return false; }
 			},
+			PackageSolvingData::RevokedSecondTxOutput(ref outp) => {
+				//TODO: should we panic on signer failure ?
+				if let Ok(sig) = onchain_handler.signer.sign_justice_revoked_second_tx(&bumped_tx, i, outp.amount, &outp.per_commitment_key, &onchain_handler.secp_ctx) {
+					let sig = taproot::Signature {
+						sig,
+						hash_ty: bitcoin::sighash::TapSighashType::Default,
+					};
+					bumped_tx.input[i].witness.push(sig.to_vec());
+				} else { return false; }
+			}
 			PackageSolvingData::CounterpartyOfferedHTLCOutput(ref outp) => {
 				let chan_keys = TxCreationKeys::derive_new(&onchain_handler.secp_ctx, &outp.per_commitment_point, &outp.counterparty_delayed_payment_base_key, &outp.counterparty_htlc_base_key, &onchain_handler.signer.pubkeys().revocation_basepoint, &onchain_handler.signer.pubkeys().htlc_basepoint);
 				assert!(outp.htlc.offered);
@@ -663,6 +687,7 @@ impl PackageSolvingData {
 		let absolute_timelock = match self {
 			PackageSolvingData::RevokedOutput(_) => current_height,
 			PackageSolvingData::RevokedHTLCOutput(_) => current_height,
+			PackageSolvingData::RevokedSecondTxOutput(_) => current_height,
 			PackageSolvingData::CounterpartyOfferedHTLCOutput(_) => current_height,
 			PackageSolvingData::CounterpartyReceivedHTLCOutput(ref outp) => cmp::max(outp.htlc.cltv_expiry, current_height),
 			// HTLC timeout/success transactions rely on a fixed timelock due to the counterparty's
@@ -684,6 +709,8 @@ impl PackageSolvingData {
 			PackageSolvingData::RevokedOutput(RevokedOutput { is_counterparty_balance_on_anchors: Some(()), .. }) => { (PackageMalleability::Malleable, false) },
 			PackageSolvingData::RevokedOutput(RevokedOutput { is_counterparty_balance_on_anchors: None, .. }) => { (PackageMalleability::Malleable, true) },
 			PackageSolvingData::RevokedHTLCOutput(..) => { (PackageMalleability::Malleable, true) },
+			PackageSolvingData::RevokedSecondTxOutput(RevokedOutput { is_counterparty_balance_on_anchors: Some(()), .. }) => { (PackageMalleability::Malleable, false) },
+			PackageSolvingData::RevokedSecondTxOutput(RevokedOutput { is_counterparty_balance_on_anchors: None, .. }) => { (PackageMalleability::Malleable, true) },
 			PackageSolvingData::CounterpartyOfferedHTLCOutput(..) => { (PackageMalleability::Malleable, true) },
 			PackageSolvingData::CounterpartyReceivedHTLCOutput(..) => { (PackageMalleability::Malleable, false) },
 			PackageSolvingData::HolderHTLCOutput(ref outp) => if outp.channel_type_features.supports_anchors_zero_fee_htlc_tx() {
@@ -704,6 +731,7 @@ impl_writeable_tlv_based_enum!(PackageSolvingData, ;
 	(3, CounterpartyReceivedHTLCOutput),
 	(4, HolderHTLCOutput),
 	(5, HolderFundingOutput),
+	(6, RevokedSecondTxOutput),
 );
 
 /// A malleable package might be aggregated with other packages to save on fees.
