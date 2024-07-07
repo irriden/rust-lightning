@@ -607,7 +607,8 @@ impl_writeable_tlv_based!(HTLCOutputInCommitment, {
 });
 
 #[inline]
-pub(crate) fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey) -> ScriptBuf {
+/// DOCUMENT THIS
+pub fn get_htlc_redeemscript_with_explicit_keys(htlc: &HTLCOutputInCommitment, channel_type_features: &ChannelTypeFeatures, broadcaster_htlc_key: &HtlcKey, countersignatory_htlc_key: &HtlcKey, revocation_key: &RevocationKey) -> ScriptBuf {
 	let payment_hash160 = Ripemd160::hash(&htlc.payment_hash.0[..]).to_byte_array();
 	if htlc.offered {
 		let mut bldr = Builder::new().push_opcode(opcodes::all::OP_DUP)
