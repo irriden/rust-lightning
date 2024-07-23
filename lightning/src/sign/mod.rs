@@ -79,6 +79,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 use musig2::types::{PartialSignature, PublicNonce};
 
 use basic::multiparty::MultiSigner;
+use basic::multiparty::get_ln_add_tweak;
+use basic::multiparty::get_ln_mul_add_tweak;
 
 pub(crate) mod type_resolver;
 
@@ -1016,6 +1018,7 @@ pub trait ChangeDestinationSource {
 /// a secure external signer.
 #[derive(Debug)]
 pub struct InMemorySigner {
+    /// This is a prototype frost signer
 	pub signer: MultiSigner,
 	/// Holder public keys and basepoints.
 	pub(crate) holder_channel_pubkeys: ChannelPublicKeys,
@@ -1057,11 +1060,11 @@ impl InMemorySigner {
 		rand_bytes_unique_start: [u8; 32],
 	) -> InMemorySigner {
 		let signer = MultiSigner::new();
-		let funding_pubkey = signer.public_key(0, Some([0x10; 32])).inner;
-		let revocation_key = signer.public_key(0, Some([0x11; 32])).inner;
-		let payment_point = signer.public_key(0, Some([0x12; 32])).inner;
-		let delayed_payment_key = signer.public_key(0, Some([0x13; 32])).inner;
-		let htlc_key = signer.public_key(0, Some([0x14; 32])).inner;
+		let funding_pubkey = signer.public_key(0, None, Some([0x10; 32]));
+		let revocation_key = signer.public_key(0, None, Some([0x11; 32]));
+		let payment_point = signer.public_key(0, None, Some([0x12; 32]));
+		let delayed_payment_key = signer.public_key(0, None, Some([0x13; 32]));
+		let htlc_key = signer.public_key(0, None, Some([0x14; 32]));
 		let holder_channel_pubkeys = ChannelPublicKeys {
 			funding_pubkey,
 			revocation_basepoint: RevocationBasepoint::from(revocation_key),
@@ -1191,7 +1194,7 @@ impl InMemorySigner {
 				.unwrap()[..]
 		);
 		let remotesig = taproot::Signature {
-			sig: self.signer.sign(0, *sighash.as_ref(), None),
+			sig: self.signer.sign(0, *sighash.as_ref(), None, None),
 			hash_ty: sighash::TapSighashType::Default,
 		};
 
@@ -1306,7 +1309,7 @@ impl InMemorySigner {
 		if spend_tx.input[input_idx].sequence.0 != descriptor.to_self_delay as u32 {
 			return Err(());
 		}
-		let ln_tweak = basic::multiparty::get_tweak(
+		let ln_tweak = get_ln_add_tweak(
 			&descriptor.per_commitment_point,
 			&self.holder_channel_pubkeys.delayed_payment_basepoint.to_public_key(),
 		);
@@ -1346,7 +1349,7 @@ impl InMemorySigner {
 					.unwrap()[..]
 			);
 			let local_delayedsig = taproot::Signature {
-				sig: self.signer.sign(0, *sighash.as_ref(), None),
+				sig: self.signer.sign(0, *sighash.as_ref(), None, None),
 				hash_ty: sighash::TapSighashType::Default,
 			};
 
@@ -1369,7 +1372,7 @@ impl InMemorySigner {
 					.unwrap()[..]
 			);
 			let local_delayedsig = taproot::Signature {
-				sig: self.signer.sign(0, *sighash.as_ref(), None),
+				sig: self.signer.sign(0, *sighash.as_ref(), None, None),
 				hash_ty: sighash::TapSighashType::Default,
 			};
 
@@ -1394,7 +1397,7 @@ impl ChannelSigner for InMemorySigner {
 	fn get_per_commitment_point(
 		&self, idx: u64, _secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> PublicKey {
-		self.signer.public_key((idx + 1) as usize, None).inner
+		self.signer.public_key((idx + 1) as usize, None, None)
 	}
 
 	fn release_commitment_secret(&self, idx: u64) -> [u8; 32] {
@@ -1446,14 +1449,14 @@ impl EcdsaChannelSigner for InMemorySigner {
 		let trusted_tx = commitment_tx.trust();
 		let keys = trusted_tx.keys();
 
-		let funding_pubkey = self.signer.public_key(0, None).inner;
+		let funding_pubkey = self.signer.public_key(0, None, None);
 		let counterparty_keys = self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR);
 		let channel_funding_redeemscript =
 			make_funding_redeemscript(&funding_pubkey, &counterparty_keys.funding_pubkey);
 
 		let built_tx = trusted_tx.built_transaction();
 		let sighash = built_tx.get_sighash_default(&channel_funding_redeemscript, self.channel_value_satoshis, secp_ctx);
-		let commitment_sig = self.signer.sign(0, *sighash.as_ref(), None);
+		let commitment_sig = self.signer.sign(0, *sighash.as_ref(), None, None);
 		let commitment_txid = built_tx.txid;
 
 		let mut htlc_sigs = Vec::with_capacity(commitment_tx.htlcs().len());
@@ -1489,8 +1492,8 @@ impl EcdsaChannelSigner for InMemorySigner {
 					)
 					.unwrap()[..]
 			);
-			let _ln_tweak = basic::multiparty::get_tweak(&keys.per_commitment_point, &self.holder_channel_pubkeys.htlc_basepoint.to_public_key());
-			htlc_sigs.push(self.signer.sign(0, *htlc_sighash.as_ref(), None));
+			let _ln_tweak = get_ln_add_tweak(&keys.per_commitment_point, &self.holder_channel_pubkeys.htlc_basepoint.to_public_key());
+			htlc_sigs.push(self.signer.sign(0, *htlc_sighash.as_ref(), None, None));
 		}
 
 		Ok((commitment_sig, htlc_sigs))
@@ -1499,13 +1502,13 @@ impl EcdsaChannelSigner for InMemorySigner {
 	fn sign_holder_commitment(
 		&self, commitment_tx: &HolderCommitmentTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		let funding_pubkey = self.signer.public_key(0, None).inner;
+		let funding_pubkey = self.signer.public_key(0, None, None);
 		let counterparty_keys = self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR);
 		let funding_redeemscript =
 			make_funding_redeemscript(&funding_pubkey, &counterparty_keys.funding_pubkey);
 		let trusted_tx = commitment_tx.trust();
 		let sighash = trusted_tx.built_transaction().get_sighash_default(&funding_redeemscript, self.channel_value_satoshis, secp_ctx);
-		let sig = self.signer.sign(0, *sighash.as_ref(), None);
+		let sig = self.signer.sign(0, *sighash.as_ref(), None, None);
 		Ok(sig)
 	}
 
@@ -1513,7 +1516,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 	fn unsafe_sign_holder_commitment(
 		&self, commitment_tx: &HolderCommitmentTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		let funding_pubkey = self.signer.public_key(0, None).inner;
+		let funding_pubkey = self.signer.public_key(0, None, None);
 		let counterparty_keys = self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR);
 		let funding_redeemscript =
 			make_funding_redeemscript(&funding_pubkey, &counterparty_keys.funding_pubkey);
@@ -1523,18 +1526,13 @@ impl EcdsaChannelSigner for InMemorySigner {
 			self.channel_value_satoshis,
 			secp_ctx,
 		);
-		Ok(self.signer.sign(0, *sighash.as_ref(), None))
+		Ok(self.signer.sign(0, *sighash.as_ref(), None, None))
 	}
 
 	fn sign_justice_revoked_output(
 		&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey,
 		secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		let revocation_key = chan_utils::derive_private_revocation_key(
-			&secp_ctx,
-			&per_commitment_key,
-			&self.revocation_base_key,
-		);
 		let per_commitment_point = PublicKey::from_secret_key(secp_ctx, &per_commitment_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
 			&secp_ctx,
@@ -1566,23 +1564,18 @@ impl EcdsaChannelSigner for InMemorySigner {
 		let mut sighash_parts = sighash::SighashCache::new(justice_tx);
 		let sighash = sighash_parts.taproot_script_spend_signature_hash(input, &prevouts, leaf_hash, sighash::TapSighashType::Default).unwrap();
 		let sighash = hash_to_message!(sighash.as_byte_array());
-		return Ok(sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &revocation_key)));
+		let (mul_tweak, add_tweak) = get_ln_mul_add_tweak(&self.signer.public_key(0, None, None), &per_commitment_key);
+		return Ok(self.signer.sign(0, *sighash.as_ref(), Some(mul_tweak), Some(add_tweak)));
 	}
 
 	fn sign_justice_revoked_htlc(
 		&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey,
 		htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		let revocation_key = chan_utils::derive_private_revocation_key(
-			&secp_ctx,
-			&per_commitment_key,
-			&self.revocation_base_key,
-		);
-		let kp = KeyPair::from_secret_key(secp_ctx, &revocation_key);
 		let per_commitment_point = PublicKey::from_secret_key(secp_ctx, &per_commitment_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
 			&secp_ctx,
-			&self.pubkeys().revocation_basepoint,
+			&RevocationBasepoint(self.signer.public_key(1, None, None)),
 			&per_commitment_point,
 		);
 		let (_, info) = {
@@ -1615,27 +1608,21 @@ impl EcdsaChannelSigner for InMemorySigner {
 		}];
 		let prevouts = sighash::Prevouts::All(&prevout);
 		assert!(info.merkle_root().is_some());
-		let tweaked = kp.tap_tweak(secp_ctx, info.merkle_root());
+		let add_tweak = bitcoin::taproot::TapTweakHash::from_key_and_tweak(revocation_pubkey.to_public_key().x_only_public_key().0, info.merkle_root());
 		let mut sighash_parts = sighash::SighashCache::new(justice_tx);
 		let sighash = sighash_parts.taproot_key_spend_signature_hash(input, &prevouts, sighash::TapSighashType::Default).unwrap();
 		let sighash = hash_to_message!(sighash.as_byte_array());
-		return Ok(sign_schnorr(secp_ctx, &sighash, &tweaked.to_inner()));
+		return Ok(self.signer.sign(1, *sighash.as_ref(), None, Some(add_tweak.to_scalar().to_be_bytes())));
 	}
 
 	fn sign_justice_revoked_second_tx(
 		&self, justice_tx: &Transaction, input: usize, amount: u64, per_commitment_key: &SecretKey,
 		secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		let revocation_key = chan_utils::derive_private_revocation_key(
-			&secp_ctx,
-			&per_commitment_key,
-			&self.revocation_base_key,
-		);
-		let kp = KeyPair::from_secret_key(secp_ctx, &revocation_key);
 		let per_commitment_point = PublicKey::from_secret_key(secp_ctx, &per_commitment_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
 			&secp_ctx,
-			&self.pubkeys().revocation_basepoint,
+			&RevocationBasepoint(self.signer.public_key(1, None, None)),
 			&per_commitment_point,
 		);
 		let (_, info) = {
@@ -1660,18 +1647,18 @@ impl EcdsaChannelSigner for InMemorySigner {
 		}];
 		let prevouts = sighash::Prevouts::All(&prevout);
 		assert!(info.merkle_root().is_some());
-		let tweaked = kp.tap_tweak(secp_ctx, info.merkle_root());
+		let add_tweak = bitcoin::taproot::TapTweakHash::from_key_and_tweak(revocation_pubkey.to_public_key().x_only_public_key().0, info.merkle_root());
 		let mut sighash_parts = sighash::SighashCache::new(justice_tx);
 		let sighash = sighash_parts.taproot_key_spend_signature_hash(input, &prevouts, sighash::TapSighashType::Default).unwrap();
 		let sighash = hash_to_message!(sighash.as_byte_array());
-		return Ok(sign_schnorr(secp_ctx, &sighash, &tweaked.to_inner()));
+		return Ok(self.signer.sign(1, *sighash.as_ref(), None, Some(add_tweak.to_scalar().to_be_bytes())));
 	}
 
 	fn sign_holder_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, htlc_descriptor: &HTLCDescriptor,
 		secp_ctx: &Secp256k1<secp256k1::All>, prevouts: &[TxOut],
 	) -> Result<schnorr::Signature, ()> {
-		let (witness_script, info) = htlc_descriptor.witness_script(secp_ctx);
+		let (witness_script, _info) = htlc_descriptor.witness_script(secp_ctx);
 		let prevout = sighash::Prevouts::All(&prevouts);
 		let leaf_hash = witness_script.0.tapscript_leaf_hash();
 		let sighash = &sighash::SighashCache::new(htlc_tx)
@@ -1682,21 +1669,15 @@ impl EcdsaChannelSigner for InMemorySigner {
 				sighash::TapSighashType::Default,
 			)
 			.map_err(|_| ())?;
-		let our_htlc_private_key = chan_utils::derive_private_key(
-			secp_ctx,
-			&htlc_descriptor.per_commitment_point,
-			&self.htlc_base_key,
-		);
+		let add_tweak = get_ln_add_tweak(&htlc_descriptor.per_commitment_point, &self.signer.public_key(1, None, None));
 		let sighash = hash_to_message!(sighash.as_byte_array());
-		Ok(sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &our_htlc_private_key)))
+		Ok(self.signer.sign(2, *sighash.as_ref(), None, Some(add_tweak)))
 	}
 
 	fn sign_counterparty_htlc_transaction(
 		&self, htlc_tx: &Transaction, input: usize, amount: u64, per_commitment_point: &PublicKey,
 		htlc: &HTLCOutputInCommitment, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		let htlc_key =
-			chan_utils::derive_private_key(&secp_ctx, &per_commitment_point, &self.htlc_base_key);
 		let revocation_pubkey = RevocationKey::from_basepoint(
 			&secp_ctx,
 			&self.pubkeys().revocation_basepoint,
@@ -1732,46 +1713,35 @@ impl EcdsaChannelSigner for InMemorySigner {
 				.taproot_script_spend_signature_hash(input, &sighash::Prevouts::All(&prevout), leaf_hash, sighash::TapSighashType::Default)
 				.unwrap()[..]
 		);
-		Ok(sign_schnorr(secp_ctx, &sighash, &KeyPair::from_secret_key(secp_ctx, &htlc_key)))
+		let add_tweak = get_ln_add_tweak(&per_commitment_point, &self.signer.public_key(2, None, None));
+		Ok(self.signer.sign(2, *sighash.as_ref(), None, Some(add_tweak)))
 	}
 
 	fn sign_closing_transaction(
 		&self, closing_tx: &ClosingTransaction, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<schnorr::Signature, ()> {
-		let funding_pubkey = PublicKey::from_secret_key(secp_ctx, &self.funding_key);
+		let funding_pubkey = self.signer.public_key(1, None, None);
 		let counterparty_funding_key =
 			&self.counterparty_pubkeys().expect(MISSING_PARAMS_ERR).funding_pubkey;
 		let channel_funding_redeemscript =
 			make_funding_redeemscript(&funding_pubkey, counterparty_funding_key);
-		Ok(closing_tx.trust().sign(
-			&self.funding_key,
+		let sighash = closing_tx.trust().get_sighash_default(
 			&channel_funding_redeemscript,
 			self.channel_value_satoshis,
-			secp_ctx,
-		))
+			secp_ctx);
+		Ok(self.signer.sign(1, *sighash.as_ref(), None, None))
 	}
 
 	fn sign_holder_anchor_input(
 		&self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<Signature, ()> {
-		let witness_script =
-			chan_utils::get_anchor_redeemscript(&self.holder_channel_pubkeys.funding_pubkey);
-		let sighash = sighash::SighashCache::new(&*anchor_tx)
-			.segwit_signature_hash(
-				input,
-				&witness_script,
-				ANCHOR_OUTPUT_VALUE_SATOSHI,
-				EcdsaSighashType::All,
-			)
-			.unwrap();
-		Ok(sign_with_aux_rand(secp_ctx, &hash_to_message!(&sighash[..]), &self.funding_key, &self))
+		todo!();
 	}
 
 	fn sign_channel_announcement_with_funding_key(
 		&self, msg: &UnsignedChannelAnnouncement, secp_ctx: &Secp256k1<secp256k1::All>,
 	) -> Result<Signature, ()> {
-		let msghash = hash_to_message!(&Sha256dHash::hash(&msg.encode()[..])[..]);
-		Ok(secp_ctx.sign_ecdsa(&msghash, &self.funding_key))
+		todo!();
 	}
 }
 
@@ -1854,6 +1824,8 @@ impl WriteableEcdsaChannelSigner for InMemorySigner {}
 
 impl Writeable for InMemorySigner {
 	fn write<W: Writer>(&self, writer: &mut W) -> Result<(), Error> {
+    todo!();
+    /*
 		write_ver_prefix!(writer, SERIALIZATION_VERSION, MIN_SERIALIZATION_VERSION);
 
 		self.funding_key.write(writer)?;
@@ -1869,6 +1841,7 @@ impl Writeable for InMemorySigner {
 		write_tlv_fields!(writer, {});
 
 		Ok(())
+    */
 	}
 }
 
@@ -1888,6 +1861,8 @@ where
 		let counterparty_channel_data = Readable::read(reader)?;
 		let channel_value_satoshis = Readable::read(reader)?;
 		let secp_ctx = Secp256k1::signing_only();
+        todo!();
+        /*
 		let holder_channel_pubkeys = InMemorySigner::make_holder_keys(
 			&secp_ctx,
 			&funding_key,
@@ -1901,18 +1876,13 @@ where
 		read_tlv_fields!(reader, {});
 
 		Ok(InMemorySigner {
-			funding_key,
-			revocation_base_key,
-			payment_key,
-			delayed_payment_base_key,
-			htlc_base_key,
-			commitment_seed,
 			channel_value_satoshis,
 			holder_channel_pubkeys,
 			channel_parameters: counterparty_channel_data,
 			channel_keys_id: keys_id,
 			entropy_source: RandomBytes::new(entropy_source.get_secure_random_bytes()),
 		})
+        */
 	}
 }
 
