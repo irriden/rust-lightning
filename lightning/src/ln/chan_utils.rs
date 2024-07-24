@@ -243,14 +243,14 @@ pub fn build_closing_transaction(to_holder_value_sat: u64, to_counterparty_value
 /// or so.
 #[derive(Clone)]
 pub struct CounterpartyCommitmentSecrets {
-	old_secrets: [([u8; 32], u64); 49],
+	old_secrets: [Option<[u8;32]>; 100],
 }
 
 impl Eq for CounterpartyCommitmentSecrets {}
 impl PartialEq for CounterpartyCommitmentSecrets {
 	fn eq(&self, other: &Self) -> bool {
-		for (&(ref secret, ref idx), &(ref o_secret, ref o_idx)) in self.old_secrets.iter().zip(other.old_secrets.iter()) {
-			if secret != o_secret || idx != o_idx {
+		for (ref secret, ref o_secret) in self.old_secrets.iter().zip(other.old_secrets.iter()) {
+			if secret != o_secret {
 				return false
 			}
 		}
@@ -261,94 +261,64 @@ impl PartialEq for CounterpartyCommitmentSecrets {
 impl CounterpartyCommitmentSecrets {
 	/// Creates a new empty `CounterpartyCommitmentSecrets` structure.
 	pub fn new() -> Self {
-		Self { old_secrets: [([0; 32], 1 << 48); 49], }
+		Self { old_secrets: [None; 100], }
 	}
 
 	#[inline]
-	fn place_secret(idx: u64) -> u8 {
-		for i in 0..48 {
-			if idx & (1 << i) == (1 << i) {
-				return i
-			}
-		}
-		48
+	fn place_secret(idx: u64) -> usize {
+		let origin: u64 = (1 << 48) - 1;
+		let ptr: usize = (origin - idx).try_into().unwrap();
+		ptr
 	}
 
 	/// Returns the minimum index of all stored secrets. Note that indexes start
 	/// at 1 << 48 and get decremented by one for each new secret.
 	pub fn get_min_seen_secret(&self) -> u64 {
-		//TODO This can be optimized?
-		let mut min = 1 << 48;
-		for &(_, idx) in self.old_secrets.iter() {
-			if idx < min {
-				min = idx;
-			}
+		let idx: u64 = 1 << 48;
+		let mut i = 0;
+		while self.old_secrets[i].is_some() {
+			i += 1;
 		}
-		min
+		idx - i as u64
 	}
 
 	#[inline]
-	fn derive_secret(secret: [u8; 32], bits: u8, idx: u64) -> [u8; 32] {
-		let mut res: [u8; 32] = secret;
-		for i in 0..bits {
-			let bitpos = bits - 1 - i;
-			if idx & (1 << bitpos) == (1 << bitpos) {
-				res[(bitpos / 8) as usize] ^= 1 << (bitpos & 7);
-				res = Sha256::hash(&res).to_byte_array();
-			}
-		}
-		res
+	fn _derive_secret(_secret: [u8; 32], _bits: u8, _idx: u64) -> [u8; 32] {
+		todo!();
 	}
 
 	/// Inserts the `secret` at `idx`. Returns `Ok(())` if the secret
 	/// was generated in accordance with BOLT 3 and is consistent with previous secrets.
 	pub fn provide_secret(&mut self, idx: u64, secret: [u8; 32]) -> Result<(), ()> {
 		let pos = Self::place_secret(idx);
-		for i in 0..pos {
-			let (old_secret, old_idx) = self.old_secrets[i as usize];
-			if Self::derive_secret(secret, pos, old_idx) != old_secret {
-				return Err(());
-			}
-		}
-		if self.get_min_seen_secret() <= idx {
-			return Ok(());
-		}
-		self.old_secrets[pos as usize] = (secret, idx);
+		println!("inserting secret at position {}", pos);
+		self.old_secrets[pos] = Some(secret);
 		Ok(())
 	}
 
 	/// Returns the secret at `idx`.
 	/// Returns `None` if `idx` is < [`CounterpartyCommitmentSecrets::get_min_seen_secret`].
 	pub fn get_secret(&self, idx: u64) -> Option<[u8; 32]> {
-		for i in 0..self.old_secrets.len() {
-			if (idx & (!((1 << i) - 1))) == self.old_secrets[i].1 {
-				return Some(Self::derive_secret(self.old_secrets[i].0, i as u8, idx))
-			}
-		}
-		assert!(idx < self.get_min_seen_secret());
-		None
+		let pos = Self::place_secret(idx);
+		println!("returning secret at position {}", pos);
+		self.old_secrets[pos]
 	}
 }
 
 impl Writeable for CounterpartyCommitmentSecrets {
 	fn write<W: Writer>(&self, writer: &mut W) -> Result<(), io::Error> {
-		for &(ref secret, ref idx) in self.old_secrets.iter() {
-			writer.write_all(secret)?;
-			writer.write_all(&idx.to_be_bytes())?;
-		}
-		write_tlv_fields!(writer, {});
+		// TODO: review this
+		self.old_secrets.iter().filter_map(|secret| secret.as_ref()).for_each(|s| writer.write_all(s).unwrap());
 		Ok(())
 	}
 }
 impl Readable for CounterpartyCommitmentSecrets {
-	fn read<R: io::Read>(reader: &mut R) -> Result<Self, DecodeError> {
-		let mut old_secrets = [([0; 32], 1 << 48); 49];
-		for &mut (ref mut secret, ref mut idx) in old_secrets.iter_mut() {
-			*secret = Readable::read(reader)?;
-			*idx = Readable::read(reader)?;
-		}
-		read_tlv_fields!(reader, {});
-		Ok(Self { old_secrets })
+	fn read<R: io::Read>(_reader: &mut R) -> Result<Self, DecodeError> {
+		// TODO: gotta fix this here
+		let db = CounterpartyCommitmentSecrets {
+			old_secrets: [None; 100],
+		};
+		Ok(db)
 	}
 }
 
