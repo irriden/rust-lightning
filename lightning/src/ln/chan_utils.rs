@@ -922,9 +922,33 @@ pub fn get_anchor_redeemscript(funding_pubkey: &PublicKey) -> ScriptBuf {
 		.into_script()
 }
 
+/// Taproot
+#[inline]
+pub fn trt_get_anchor_redeemscript(funding_pubkey: &PublicKey) -> ((ScriptBuf, taproot::LeafVersion), taproot::TaprootSpendInfo) {
+	let s = Builder::new()
+		.push_int(16)
+		.push_opcode(opcodes::all::OP_CSV)
+		.into_script();
+	let info = taproot::TaprootBuilder::new()
+		.add_leaf(0u8, s.clone())
+		.unwrap()
+		.finalize(&Secp256k1::new(), funding_pubkey.x_only_public_key().0)
+		.unwrap();
+	((s, taproot::LeafVersion::TapScript), info)
+}
+
 /// Locates the output with an anchor script paying to `funding_pubkey` within `commitment_tx`.
 pub(crate) fn get_anchor_output<'a>(commitment_tx: &'a Transaction, funding_pubkey: &PublicKey) -> Option<(u32, &'a TxOut)> {
 	let anchor_script = chan_utils::get_anchor_redeemscript(funding_pubkey).to_v0_p2wsh();
+	commitment_tx.output.iter().enumerate()
+		.find(|(_, txout)| txout.script_pubkey == anchor_script)
+		.map(|(idx, txout)| (idx as u32, txout))
+}
+
+/// Taproot version
+pub(crate) fn trt_get_anchor_output<'a>(commitment_tx: &'a Transaction, funding_pubkey: &PublicKey) -> Option<(u32, &'a TxOut)> {
+	let ((script, version), info) = chan_utils::trt_get_anchor_redeemscript(funding_pubkey);
+	let anchor_script = ScriptBuf::new_v1_p2tr_tweaked(info.output_key());
 	commitment_tx.output.iter().enumerate()
 		.find(|(_, txout)| txout.script_pubkey == anchor_script)
 		.map(|(idx, txout)| (idx as u32, txout))
@@ -1638,10 +1662,11 @@ impl CommitmentTransaction {
 
 		if channel_parameters.channel_type_features().supports_anchors_zero_fee_htlc_tx() {
 			if to_broadcaster_value_sat > 0 || !htlcs_with_aux.is_empty() {
-				let anchor_script = get_anchor_redeemscript(broadcaster_funding_key);
+				let info = trt_get_anchor_redeemscript(broadcaster_funding_key).1;
+				let script_pubkey = ScriptBuf::new_v1_p2tr_tweaked(info.output_key());
 				txouts.push((
 					TxOut {
-						script_pubkey: anchor_script.to_v0_p2wsh(),
+						script_pubkey,
 						value: ANCHOR_OUTPUT_VALUE_SATOSHI,
 					},
 					None,
@@ -1649,10 +1674,11 @@ impl CommitmentTransaction {
 			}
 
 			if to_countersignatory_value_sat > 0 || !htlcs_with_aux.is_empty() {
-				let anchor_script = get_anchor_redeemscript(countersignatory_funding_key);
+				let info = trt_get_anchor_redeemscript(countersignatory_funding_key).1;
+				let script_pubkey = ScriptBuf::new_v1_p2tr_tweaked(info.output_key());
 				txouts.push((
 					TxOut {
-						script_pubkey: anchor_script.to_v0_p2wsh(),
+						script_pubkey,
 						value: ANCHOR_OUTPUT_VALUE_SATOSHI,
 					},
 					None,

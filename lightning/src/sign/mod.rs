@@ -1730,7 +1730,7 @@ impl EcdsaChannelSigner for InMemorySigner {
 
 	fn sign_holder_anchor_input(
 		&self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<secp256k1::All>,
-	) -> Result<Signature, ()> {
+	) -> Result<schnorr::Signature, ()> {
 		todo!();
 	}
 
@@ -1808,7 +1808,7 @@ impl TaprootChannelSigner for InMemorySigner {
 	fn sign_holder_anchor_input(
 		&self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<All>,
 	) -> Result<schnorr::Signature, ()> {
-		todo!()
+		todo!();
 	}
 }
 

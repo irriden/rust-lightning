@@ -661,7 +661,7 @@ impl<ChannelSigner: WriteableEcdsaChannelSigner> OnchainTxHandler<ChannelSigner>
 
 					// We'll locate an anchor output we can spend within the commitment transaction.
 					let funding_pubkey = &self.channel_transaction_parameters.holder_pubkeys.funding_pubkey;
-					match chan_utils::get_anchor_output(&tx.0, funding_pubkey) {
+					match chan_utils::trt_get_anchor_output(&tx.0, funding_pubkey) {
 						// An anchor output was found, so we should yield a funding event externally.
 						Some((idx, _)) => {
 							// TODO: Use a lower confirmation target when both our and the

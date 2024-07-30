@@ -41,6 +41,8 @@ use bitcoin::secp256k1;
 use bitcoin::secp256k1::{PublicKey, Secp256k1};
 use bitcoin::secp256k1::ecdsa::Signature;
 use bitcoin::secp256k1::schnorr;
+use bitcoin::taproot;
+use bitcoin::sighash;
 
 pub(crate) const EMPTY_SCRIPT_SIG_WEIGHT: u64 = 1 /* empty script_sig */ * WITNESS_SCALE_FACTOR as u64;
 
@@ -63,7 +65,7 @@ impl AnchorDescriptor {
 	/// [`Self::unsigned_tx_input`].
 	pub fn previous_utxo(&self) -> TxOut {
 		TxOut {
-			script_pubkey: self.witness_script().to_v0_p2wsh(),
+			script_pubkey: self.witness_script(),
 			value: ANCHOR_OUTPUT_VALUE_SATOSHI,
 		}
 	}
@@ -82,14 +84,20 @@ impl AnchorDescriptor {
 	/// Returns the witness script of the anchor output in the commitment transaction.
 	pub fn witness_script(&self) -> ScriptBuf {
 		let channel_params = self.channel_derivation_parameters.transaction_parameters.as_holder_broadcastable();
-		chan_utils::get_anchor_redeemscript(&channel_params.broadcaster_pubkeys().funding_pubkey)
+		let info = chan_utils::trt_get_anchor_redeemscript(&channel_params.broadcaster_pubkeys().funding_pubkey).1;
+		ScriptBuf::new_v1_p2tr_tweaked(info.output_key())
 	}
 
 	/// Returns the fully signed witness required to spend the anchor output in the commitment
 	/// transaction.
-	pub fn tx_input_witness(&self, signature: &Signature) -> Witness {
-		let channel_params = self.channel_derivation_parameters.transaction_parameters.as_holder_broadcastable();
-		chan_utils::build_anchor_input_witness(&channel_params.broadcaster_pubkeys().funding_pubkey, signature)
+	pub fn tx_input_witness(&self, signature: &schnorr::Signature) -> Witness {
+		let mut witness = Witness::new();
+		let anchor_sig = taproot::Signature {
+			sig: signature.clone(),
+			hash_ty: sighash::TapSighashType::Default,
+		};
+		witness.push(anchor_sig.to_vec());
+		witness
 	}
 
 	/// Derives the channel signer required to sign the anchor input.
