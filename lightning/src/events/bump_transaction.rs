@@ -660,10 +660,11 @@ where
 		let unsigned_tx_weight = anchor_psbt.unsigned_tx.weight().to_wu() - (anchor_psbt.unsigned_tx.input.len() as u64 * EMPTY_SCRIPT_SIG_WEIGHT);
 
 		log_debug!(self.logger, "Signing anchor transaction {}", anchor_txid);
+		let prevouts: Vec<_> = anchor_psbt.inputs.iter().map(|input| input.witness_utxo.clone().unwrap()).collect();
 		anchor_tx = self.utxo_source.sign_psbt(anchor_psbt)?;
 
 		let signer = anchor_descriptor.derive_channel_signer(&self.signer_provider);
-		let anchor_sig = signer.sign_holder_anchor_input(&anchor_tx, 0, &self.secp)?;
+		let anchor_sig = signer.sign_holder_anchor_input(&anchor_tx, 0, &self.secp, &prevouts)?;
 		anchor_tx.input[0].witness = anchor_descriptor.tx_input_witness(&anchor_sig);
 
 /*

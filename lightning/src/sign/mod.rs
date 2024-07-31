@@ -1729,9 +1729,17 @@ impl EcdsaChannelSigner for InMemorySigner {
 	}
 
 	fn sign_holder_anchor_input(
-		&self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<secp256k1::All>,
+		&self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<secp256k1::All>, prevouts: &[TxOut],
 	) -> Result<schnorr::Signature, ()> {
-		todo!();
+		use sighash::{Prevouts, TapSighashType};
+
+		let funding_pubkey = self.pubkeys().funding_pubkey;
+		let (script, info) = chan_utils::trt_get_anchor_redeemscript(&funding_pubkey);
+		let script_pubkey = ScriptBuf::new_v1_p2tr_tweaked(info.output_key());
+		let prevouts = Prevouts::All(prevouts);
+		let mut sighasher = sighash::SighashCache::new(anchor_tx);
+		let sighash = sighasher.taproot_key_spend_signature_hash(input, &prevouts, TapSighashType::Default).unwrap();
+		Ok(self.signer.sign(LnKeys::Funding, sighash.to_raw_hash().to_byte_array(), None, None))
 	}
 
 	fn sign_channel_announcement_with_funding_key(
@@ -1806,7 +1814,7 @@ impl TaprootChannelSigner for InMemorySigner {
 	}
 
 	fn sign_holder_anchor_input(
-		&self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<All>,
+		&self, anchor_tx: &Transaction, input: usize, secp_ctx: &Secp256k1<All>, prevouts: &[TxOut],
 	) -> Result<schnorr::Signature, ()> {
 		todo!();
 	}
