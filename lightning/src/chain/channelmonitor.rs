@@ -1447,8 +1447,8 @@ impl<Signer: WriteableEcdsaChannelSigner> ChannelMonitor<Signer> {
 
 		drop(inner);
 		let txs = self.unsafe_get_latest_holder_commitment_txn(logger);
-		println!("tx states:");
-		txs.iter().for_each(|tx| { let mut vec = Vec::new(); tx.consensus_encode(&mut vec).unwrap(); println!("{}", vec.as_hex());});
+		//println!("tx states:");
+		//txs.iter().for_each(|tx| { let mut vec = Vec::new(); tx.consensus_encode(&mut vec).unwrap(); println!("{}", vec.as_hex());});
 		ret
 	}
 

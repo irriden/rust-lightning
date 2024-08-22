@@ -78,10 +78,10 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(taproot)]
 use musig2::types::{PartialSignature, PublicNonce};
 
-use basic::multiparty::MultiSigner;
-use basic::multiparty::get_ln_add_tweak;
-use basic::multiparty::get_ln_mul_add_tweak;
-use basic::multiparty::LnKeys;
+use frost_ln_signer::multiparty::MultiSigner;
+use frost_ln_signer::multiparty::get_ln_add_tweak;
+use frost_ln_signer::multiparty::get_ln_mul_add_tweak;
+use frost_ln_signer::multiparty::LnKeys;
 
 pub(crate) mod type_resolver;
 

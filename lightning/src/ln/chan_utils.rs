@@ -291,7 +291,7 @@ impl CounterpartyCommitmentSecrets {
 	/// was generated in accordance with BOLT 3 and is consistent with previous secrets.
 	pub fn provide_secret(&mut self, idx: u64, secret: [u8; 32]) -> Result<(), ()> {
 		let pos = Self::place_secret(idx);
-		println!("inserting secret at position {}", pos);
+		//println!("inserting secret at position {}", pos);
 		self.old_secrets[pos] = Some(secret);
 		Ok(())
 	}
@@ -300,7 +300,7 @@ impl CounterpartyCommitmentSecrets {
 	/// Returns `None` if `idx` is < [`CounterpartyCommitmentSecrets::get_min_seen_secret`].
 	pub fn get_secret(&self, idx: u64) -> Option<[u8; 32]> {
 		let pos = Self::place_secret(idx);
-		println!("returning secret at position {}", pos);
+		//println!("returning secret at position {}", pos);
 		self.old_secrets[pos]
 	}
 }

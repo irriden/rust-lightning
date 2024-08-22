@@ -50,7 +50,7 @@ backtrace = { version = "0.3", optional = true }
 
 core2 = { version = "0.3.0", optional = true, default-features = false }
 libm = { version = "0.2", optional = true, default-features = false }
-basic = { path = "../../basic" }
+frost-ln-signer = { path = "../../frost-ln-signer" }
 
 [dev-dependencies]
 regex = "1.5.6"
