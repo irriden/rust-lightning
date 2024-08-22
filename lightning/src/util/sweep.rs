@@ -569,7 +569,10 @@ where
 	) -> Result<Transaction, ()> {
 		let tx_feerate =
 			self.fee_estimator.get_est_sat_per_1000_weight(ConfirmationTarget::OutputSpendingFee);
-		let change_destination_script = bitcoin::ScriptBuf::new_p2pk(&bitcoin::PublicKey::from_private_key(&Secp256k1::new(), &bitcoin::PrivateKey::from_slice(&[0xca;32], bitcoin::Network::Regtest).unwrap()));
+		let mut sk = [0u8; 32];
+		use rand::RngCore;
+		rand::rngs::OsRng.fill_bytes(&mut sk);
+		let change_destination_script = bitcoin::ScriptBuf::new_p2pk(&bitcoin::PublicKey::from_private_key(&Secp256k1::new(), &bitcoin::PrivateKey::from_slice(&sk, bitcoin::Network::Regtest).unwrap()));
 		//let change_destination_script =
 	//		self.change_destination_source.get_change_destination_script()?;
 		let cur_height = sweeper_state.best_block.height;
